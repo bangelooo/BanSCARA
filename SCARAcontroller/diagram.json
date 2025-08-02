@@ -1,0 +1,59 @@
+{
+  "version": 1,
+  "author": "AB",
+  "editor": "wokwi",
+  "parts": [
+    { "type": "wokwi-breadboard-half", "id": "bb1", "top": 102.6, "left": 118, "attrs": {} },
+    { "type": "wokwi-arduino-uno", "id": "uno", "top": 451.8, "left": 133.8, "attrs": {} },
+    {
+      "type": "wokwi-stepper-motor",
+      "id": "stepper1",
+      "top": -121.19,
+      "left": 278.83,
+      "attrs": { "size": "17" }
+    },
+    { "type": "wokwi-a4988", "id": "drv1", "top": -62.4, "left": 168, "attrs": {} },
+    { "type": "wokwi-vcc", "id": "vcc2", "top": 279.16, "left": 499.2, "attrs": {} },
+    {
+      "type": "wokwi-stepper-motor",
+      "id": "stepper2",
+      "top": -121.19,
+      "left": 691.63,
+      "attrs": { "size": "17" }
+    },
+    { "type": "wokwi-a4988", "id": "drv2", "top": -62.4, "left": 552, "attrs": {} }
+  ],
+  "connections": [
+    [ "uno:5V", "bb1:tp.1", "red", [ "v47.9", "h-245.8", "v-460.8" ] ],
+    [ "uno:GND.2", "bb1:tn.1", "black", [ "v57.5", "h-245.7", "v-518.4", "h94.4" ] ],
+    [ "bb1:tn.25", "bb1:bn.25", "black", [ "v-0.1", "h40", "v172.8" ] ],
+    [ "drv1:1A", "stepper1:A+", "black", [ "h19.35", "v115.28", "h115.2" ] ],
+    [ "drv1:1B", "stepper1:A-", "green", [ "h28.95", "v96.08", "h96" ] ],
+    [ "drv1:2A", "stepper1:B+", "red", [ "h38.55", "v105.68", "h105.6" ] ],
+    [ "drv1:2B", "stepper1:B-", "blue", [ "h48.15", "v105.68", "h105.6" ] ],
+    [ "drv1:VMOT", "bb1:bp.20", "red", [ "h19.35", "v-95.92", "h240", "v480", "h-116.8" ] ],
+    [ "drv1:GND.2", "bb1:bn.21", "black", [ "h38.55", "v-86.32", "h211.2", "v451.2", "h-86.4" ] ],
+    [ "drv1:ENABLE", "bb1:tn.3", "black", [ "h-67.2", "v144", "h67.2" ] ],
+    [ "drv1:RESET", "drv1:SLEEP", "black", [ "h0" ] ],
+    [ "drv1:STEP", "uno:3", "blue", [ "h-86.4", "v422.4", "h274.4" ] ],
+    [ "drv1:DIR", "uno:2", "green", [ "h-76.8", "v393.6", "h274.3" ] ],
+    [ "bb1:bp.16", "vcc2:VCC", "red", [ "v66.3", "h184" ] ],
+    [ "drv2:RESET", "drv2:SLEEP", "black", [ "h0" ] ],
+    [ "drv2:1B", "stepper2:A-", "green", [ "h76.95", "v76.88", "h76.8" ] ],
+    [ "drv2:1A", "stepper2:A+", "black", [ "h67.35", "v105.68", "h96" ] ],
+    [ "drv2:2A", "stepper2:B+", "red", [ "h48.15", "v124.88", "h96" ] ],
+    [ "drv2:2B", "stepper2:B-", "blue", [ "h38.55", "v144.08", "h144.01" ] ],
+    [ "drv2:ENABLE", "bb1:tn.23", "black", [ "h-105.6", "v134.4", "h-48" ] ],
+    [ "uno:8", "drv2:STEP", "blue", [ "v-76.8", "h221.2", "v-384" ] ],
+    [ "drv2:DIR", "uno:9", "green", [ "h-9.6", "v384", "h-249.6" ] ],
+    [ "drv2:VMOT", "bb1:bp.18", "red", [ "h48.15", "v-95.92", "h211.2", "v489.6", "h-518.4" ] ],
+    [
+      "drv2:GND.2",
+      "bb1:bn.17",
+      "black",
+      [ "h67.35", "v-86.32", "h211.2", "v480", "h-547.2", "v-9.6" ]
+    ]
+  ],
+  "serialMonitor": { "display": "auto", "newline": "lf" },
+  "dependencies": {}
+}
