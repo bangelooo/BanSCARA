@@ -17,10 +17,13 @@ class motorBasic
 
   void moveRelative(AccelStepper&, axisPar&,float,float);
   void moveAbsolute(AccelStepper&, axisPar&,float,float);
-
+  void moveVelocity(AccelStepper&, axisPar&,float,float);
   void stopMotor(AccelStepper&, axisPar&);
 
   void mtrCal(AccelStepper&, axisPar&);
+
+  private:
+    bool relMoveDone;
 
 };
 

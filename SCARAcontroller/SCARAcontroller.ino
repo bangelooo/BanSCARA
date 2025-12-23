@@ -19,6 +19,7 @@ AccelStepper mtr2(AccelStepper::DRIVER,stepPin2,dirPin2);
 AccelStepper mtr3(AccelStepper::DRIVER,stepPin3,dirPin3);
 AccelStepper *mtrs[]={&mtr,&mtr2,&mtr3};
 
+
 // Create instance of axis parameters
 axisPar mtrPar1(1,19,microStepMode::half);
 axisPar mtrPar2(2,20,microStepMode::half);
@@ -30,8 +31,6 @@ motorBasic mtrBasic1;
 motorBasic mtrBasic2;
 motorBasic mtrBasic3;
 motorBasic *mtrBasics[] = {&mtrBasic1,&mtrBasic2,&mtrBasic3};
-
-
 
 // Global variables
 String robotCmd = "";
@@ -46,6 +45,9 @@ long qPos[numJoints]  = {0,0,0};
 long qdot[numJoints]  = {0,0,0};
 long qDist[numJoints] = {0,0,0};
 moveMode mode = moveMode::moveIdle;
+
+unsigned long startTime;
+unsigned long loopTime;
 
 void setup() 
 {
@@ -62,7 +64,7 @@ void setup()
       L     L     1/8
       H     H     1/16
   */
-
+// Set micro-stepping pins as outputs
   switch(mtrPar1.microMode)
   { case microStepMode::half:
       digitalWrite(ms1Pin,HIGH);
@@ -82,21 +84,28 @@ void setup()
       break;
   }
 
-  // Set micro-stepping pins as outputs
+  // Change postive direction
+  mtr2.setPinsInverted(true,false,false);
+  mtr3.setPinsInverted(true,false,false);
+
+  
   for(auto mo:mtrs)
   {
     mo->setMaxSpeed(1500);
     mo->setAcceleration(2000);
+
   }
 
 }
 
 void loop() 
 {
+
+
   // 1. Prompt user for a robot command
   if(!cmdRequest)
   {
-    Serial.println("Please enter a robot command.");
+    Serial.println("READY.");
     cmdRequest = true;
   }
   // 2. Check if new serial input;
@@ -104,6 +113,7 @@ void loop()
   
   if(stringComplete)
   {
+    startTime = micros();
     Serial.print("Command issued: ");
     Serial.println(robotCmd);
     // 3. Parse Robot Command and set parameters
@@ -121,9 +131,12 @@ void loop()
     {
       mtrBasics[i]->moveRequested = false;
     }
-    
+    loopTime = micros() - startTime;
+
+    // Serial.print("Parse time (microseconds): ");
+    // Serial.println(loopTime);
   }
-    //Serial.print(static_cast<int>(mode));
+
 
    //4. Motion Logic
    switch(mode)
@@ -133,17 +146,44 @@ void loop()
         {
           mtrBasics[i]->moveAbsolute(*mtrs[i],*mtrPars[i],qPos[i],5);
         }
+        if(allMotorsIdle()) mode = moveMode::moveIdle; // <-- reset when done
         break;
+      
       case moveMode::moveRelative:
         for(auto i = 0; i < numJoints; ++i)
         {
           mtrBasics[i]->moveRelative(*mtrs[i],*mtrPars[i],qDist[i],5);
         }
+        if(allMotorsIdle()) 
+        {
+          
+          for(auto i = 0; i < numJoints; ++i)
+          {
+            qPos[i] = mtrPars[i]->stepToDeg(mtrs[i]->currentPosition());
+            qDist[i] = 0;
+            mtrBasics[i]->moveRequested = false;
+          }
+          mode = moveMode::moveIdle; // <-- reset when done
+        }
         break;
+      
+      case moveMode::moveVelocity:
+        for(auto i = 0; i < numJoints; ++i)
+        {
+          mtrBasics[i]->moveVelocity(*mtrs[i], *mtrPars[i], qdot[i], 0);
+
+        }
+        break;
+
+
       case moveMode::moveStopping:
         for(auto i = 0; i < numJoints; ++i)
         {
           mtrBasics[i]->stopMotor(*mtrs[i],*mtrPars[i]);
+
+          long steps = mtrs[i]->currentPosition();
+          qPos[i] = mtrPars[i]->stepToDeg(steps);
+          mtrPars[i]->qPosDes = qPos[i];
         }
         break;
       case moveMode::moveHoming:
@@ -151,8 +191,21 @@ void loop()
           mtrBasics[1]->mtrCal(*mtrs[1],*mtrPars[1]);
           mtrBasics[2]->mtrCal(*mtrs[2],*mtrPars[2]);
         break;
+      default:
+        break;
    }
+
+
+
 } 
+
+
+bool allMotorsIdle() {
+  for(auto i = 0; i < numJoints; ++i) {
+    if(mtrs[i]->distanceToGo() != 0) return false;
+  }
+  return true;
+}
 
 // Non-blocking serial input
 void serialEvent()
@@ -245,6 +298,9 @@ void parseRbtCmd(String cmd)
             qDist[0] = token.substring(3).toFloat();
             mtrBasic1.qSets = true;
             break;
+          case moveMode::moveVelocity:
+            qdot[0] = token.substring(3).toFloat();
+            break;
         }
       }
     } else if(token.startsWith("q2"))
@@ -255,9 +311,13 @@ void parseRbtCmd(String cmd)
         {
           case moveMode::moveAbsolute:
             qPos[1] = token.substring(3).toFloat();
+            break;
           case moveMode::moveRelative:
             qDist[1] = token.substring(3).toFloat();
             mtrBasic2.qSets = true;
+            break;
+          case moveMode::moveVelocity:
+            qdot[1] = token.substring(3).toFloat();
             break;
         }
       }
@@ -269,9 +329,13 @@ void parseRbtCmd(String cmd)
         {
           case moveMode::moveAbsolute:
             qPos[2] = token.substring(3).toFloat();
+            break;
           case moveMode::moveRelative:
             qDist[2] = token.substring(3).toFloat();
             mtrBasic3.qSets = true;
+            break;
+          case moveMode::moveVelocity:
+            qdot[2] = token.substring(3).toFloat();
             break;
         }
       }
@@ -301,6 +365,8 @@ void parseRbtCmd(String cmd)
     mtrBasics[i]->qSets = false;
    }
 }
+
+
 void resetMoveRel()
 {
   for(auto i = 0; i < numJoints; ++i)
