@@ -117,7 +117,7 @@ class robotArm():
             if elbowOrient == "elbowDown":
                 s3 = np.sqrt(1 - c3**2)
             elif elbowOrient == "elbowUp":
-                s3 = np.sqrt(1 - c3**2)
+                s3 = -np.sqrt(1 - c3**2)
             else:
                 return print("Elbow orientation not recognized. Enter 'elbowDown' OR 'elbowUp'")
         else:
@@ -175,7 +175,7 @@ class robotArm():
         # Create desired trajectory
         xTraj = np.linspace(xStart,xEnd,sample)
         yTraj = np.linspace(yStart,yEnd,sample)
-        #yTraj = np.sqrt(4 - xTraj**2)
+        #yTraj = np.sqrt(250**2 - xTraj**2)
         zTraj = np.linspace(zStart,zEnd,sample)
         phiTraj = np.linspace(phiStart,phiEnd,sample)
 
@@ -189,8 +189,8 @@ class robotArm():
         
         # Create the jplot
         fig, ax = plt.subplots()
-        ax.set_xlim(-2,2)
-        ax.set_ylim(-2,2)
+        ax.set_xlim(-300,300)
+        ax.set_ylim(-300,300)
         ax.set_aspect('equal')
         ax.grid(True)
 
@@ -223,4 +223,7 @@ class robotArm():
             return armLine,
 
         ani = FuncAnimation(fig,update,frames = sample,interval = 30,blit = True)
+        plt.title("Cartesian Space Trajectory")
+        plt.xlabel("X-Axis (mm)")
+        plt.ylabel("Y-Axis (mm)")
         plt.show()
