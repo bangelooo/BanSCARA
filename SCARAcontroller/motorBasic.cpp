@@ -47,7 +47,7 @@ void motorBasic::moveRelative(AccelStepper &mtr, axisPar &mtrPar, float distance
     moveRequested = true;
   }
 
-  if(mtr.distanceToGo() != 0)
+  if(moveRequested && mtr.distanceToGo() != 0)
   {
     mtr.run();
   }
@@ -55,7 +55,6 @@ void motorBasic::moveRelative(AccelStepper &mtr, axisPar &mtrPar, float distance
   if(moveRequested && mtr.distanceToGo() == 0)
   {
     mtr.setCurrentPosition(mtr.currentPosition());
-    moveRequested = false;
     mtrPar.qDistDes = 0;
   }
 
