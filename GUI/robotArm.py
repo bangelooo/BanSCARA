@@ -18,13 +18,17 @@ class robotArm():
         # Class attributes
         self.links = links
         self.numLinks = len(links)
-
+        self.jointPosition = np.zeros(len(links))
+        self.pose = self._initPose()
         # Check to see that all links are of the same DH type. If not, throw an error.
         dhTypes = {link.dhType for link in links}
         if len(dhTypes) != 1:
             raise ValueError(f"Mixed DH types found: {dhTypes}")
 
     # Methods
+    # ============================================================
+    #                       FORWARD KINEMATICS
+    # ============================================================
     def calculateHT(self, linkNum, q):
         """
         Returns the homogeneous transform of the specified robot link
@@ -90,9 +94,32 @@ class robotArm():
 
         self.FK = T
         self.linkPos = jointTransforms
-
         return T, jointTransforms
 
+    def _getPoseDict(self,q):
+        FK , _ = self.forwardKin(q)
+        r11 = FK[0][0]
+        r21 = FK[1][0]
+        yaw = np.arctan2(r21,r11)
+        poseDict = {
+            "FK": FK,
+            "POSITION": [FK[0][3],FK[1][3],FK[2][3]],
+            "ANGLE": yaw
+            }
+        return poseDict
+
+    def _initPose(self):
+        q = self.jointPosition
+        initPose = self._getPoseDict(q)
+        return initPose
+    
+    def updateJoints(self,q):
+        self.jointPosition = q
+        poseDict = self._getPoseDict(q) # Update POSE dictionary of robot arm
+        self.pose = poseDict
+    # ============================================================
+    #                       INVERSE KINEMATICS
+    # ============================================================
     def scaraIK(self,x,y,z,phi,elbowOrient):
         # Extract link information of robot
         L = ["null"]
@@ -144,7 +171,15 @@ class robotArm():
         q4 = float(np.rad2deg(q4))
         
         return (d1,q2,q3,q4)
-        
+
+    # ============================================================
+    #                       VELOCITY KINEMATICS
+    # ============================================================
+    def jacob(self):
+        pass
+    # ============================================================
+    #                       ANIMATION 
+    # ============================================================
     def displayRobot(self):
         x = [0]
         y = [0]
@@ -161,9 +196,6 @@ class robotArm():
         plt.xlim(-3,3)
         plt.ylim(-2,2)
         plt.show()
-    
-    def jacob(self):
-        pass
 
     def animateTraj(self,X,phi,elbowOrient,sample):
         xStart,xEnd = X[0][0], X[0][1]
