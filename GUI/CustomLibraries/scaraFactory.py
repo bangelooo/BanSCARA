@@ -1,5 +1,5 @@
 import numpy as np
-from robotArm import robotArm,robotLink
+from CustomLibraries.robotArm import robotArm,robotLink
 
 def createBanSCARA():
     # Declare robot link parametrs 

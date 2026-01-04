@@ -1,6 +1,5 @@
 import sys
 import numpy as np
-from scaraFactory import createBanSCARA
 
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QTabWidget, QWidget,
@@ -10,11 +9,16 @@ from PyQt6.QtWidgets import (
 )
 
 class RobotGUI(QMainWindow):
-    def __init__(self):
+    def __init__(self,robotObject,robotController, **kwargs):
         super().__init__()
 
-        # Create Robot Instance
-        self.robot = createBanSCARA()
+        # Create Robot and Robot Controller Instance
+        self.robot = robotObject
+        self.controller = robotController
+
+        # Create attributes for topics
+        for name,obj in kwargs.items():
+            setattr(self,name,obj)
 
         # Create logger Count
         self.logCount = 0
@@ -45,12 +49,15 @@ class RobotGUI(QMainWindow):
         self.setCentralWidget(tabs)
 
         # Check if button clicked
+
         for _, buttonGroupDict in self.buttonDict["Joint Space Control"].items():
             buttonGroupDict["button"].clicked.connect(self.sendJogCommand)
 
         for _, buttonGroupDict in self.buttonDict["Cartesian Control"].items():
             buttonGroupDict["button"].clicked.connect(self.sendCartCommand)
 
+        self.buttonDict["Robot Control"]["CONNECT"]["button"].clicked.connect(self.connect)
+        self.buttonDict["Robot Control"]["DISCONNECT"]["button"].clicked.connect(self.disconnect)
         self.buttonDict["String Command"]["output"]["button"].clicked.connect(self.clearLog)
 
 # ==================================================================  
@@ -77,15 +84,18 @@ class RobotGUI(QMainWindow):
         cpLayout = QVBoxLayout(container)
 
         # Create widget groups
+        rcGroup,rcDict = self.createRobotControlGroup()
         cCtrlGroup, cCtrlDict = self.createCCtrlGroup()
         jJogGroup,jJogDict = self.createJCtrlGroup()
 
 
         # Add buttons to desired dictionary
+        self.buttonDict["Robot Control"] = rcDict
         self.buttonDict["Cartesian Control"] = cCtrlDict
         self.buttonDict["Joint Space Control"] = jJogDict
 
         # Add widget to control panel layout
+        cpLayout.addWidget(rcGroup)
         cpLayout.addWidget(cCtrlGroup)
         cpLayout.addWidget(jJogGroup)
 
@@ -127,6 +137,23 @@ class RobotGUI(QMainWindow):
 # ==================================================================  
 #     METHODS TO CREATE GROUPINGS FOR PANELS
 # ==================================================================  
+    def createRobotControlGroup(self):
+        container = QGroupBox("ROBOT CONTROL")
+        layout = QVBoxLayout(container)
+
+        # Button Dictionary
+        rcDict = {}
+
+        for name in ["CONNECT","DISCONNECT"]:
+            btn = QPushButton(name)
+            rcDict[name] = {}
+            rcDict[name]["button"] = btn
+            layout.addWidget(btn)
+        
+        container.setLayout(layout)
+
+        return container, rcDict
+
 
     def createCCtrlGroup(self):
         container = QGroupBox("CARTESIAN CONTROL")
@@ -311,6 +338,19 @@ class RobotGUI(QMainWindow):
 #     METHODS TO BUTTON BEHAVIORS
 # ==================================================================  
 
+    def connect(self):
+        if not self.controller.serialConnect:
+            msg = self.controller.connectSerial()
+            self.updateLog("SUCCESS: " + msg)
+        else:
+            self.updateLog("Already connected")
+        
+    def disconnect(self):
+        if self.controller.serialConnect:
+            msg = self.controller.disconnectSerial()
+            self.updateLog(msg)
+        else:
+            self.updateLog("Already disconnected")
 
     def sendJogCommand(self):
         sender = self.sender()
@@ -347,9 +387,12 @@ class RobotGUI(QMainWindow):
         if joint == "all":
             strCMD =f"<ABS, Q1:{jointPositions[0]},Q2:{jointPositions[1]},Q3:{jointPositions[2]},Q4:{jointPositions[3]}>"
             self.updateLog(strCMD)
+            
 
         else:
-            strCMD = f"<REL,{joint}: {jogDistance * direction}>"
+            strCMD = f"REL,{joint}: {jogDistance * direction}"
+            if not self.controller.simulate:
+                self.controller.sendCommand(strCMD)
             self.updateLog(strCMD)
         
     def sendCartCommand(self):
@@ -426,10 +469,4 @@ class RobotGUI(QMainWindow):
 
     def clearLog(self):
         self.textBoxDict["String Command"]["output"]["field"].clear()
-
-app = QApplication(sys.argv)
-
-window = RobotGUI()
-window.show()
-
-app.exec()
+        

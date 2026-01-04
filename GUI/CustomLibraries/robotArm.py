@@ -259,3 +259,13 @@ class robotArm():
         plt.xlabel("X-Axis (mm)")
         plt.ylabel("Y-Axis (mm)")
         plt.show()
+
+
+
+        
+
+
+
+    
+    
+    
