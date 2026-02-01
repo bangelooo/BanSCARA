@@ -1,7 +1,13 @@
+# Import Python Libraries
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib.animation import FuncAnimation
+import serial
 
+# Import Custom Libraries
+from .RobotCommunications import Publisher,Subscriber
+from .TrajectoryPlanning import TrapezoidalTrajectory
+
+# ============= ROBOT LINK ======================
 class RobotLink():
     # Constructor
     def __init__(self,alpha,a,d,theta,jointType,dhType,*args):
@@ -12,6 +18,7 @@ class RobotLink():
         self.jointType = jointType
         self.dhType = dhType
 
+# ============= ROBOT ARM =======================
 class RobotArm():
     # Constructor
     def __init__(self,links):
@@ -387,14 +394,174 @@ class RobotArm():
         plt.title("Cartesian Space Trajectory")
         plt.xlabel("X-Axis (mm)")
         plt.ylabel("Y-Axis (mm)")
-        plt.show()
+        plt.show() 
+
+def createBanSCARA():
+    # Declare robot link parametrs 
+    L1,L2,L3,L4 = 1,191,191,0
+    d4 = 1
+
+    # Declare Links using Standard DH paramters
+    link1 = RobotLink(0,0,L1,0,"prismatic","std")
+    link2 = RobotLink(0,L2,0,0,"revolute","std")
+    link3 = RobotLink(0,L3,0,0,"revolute","std")
+    linkEE = RobotLink(-np.pi,L4,d4,0,"revolute","std")
 
 
+    # Group robot links
+    robotlinks = [link1,link2,link3,linkEE]
 
+    # Create robot 
+    scaraRobot = RobotArm(robotlinks)
+
+    return scaraRobot
+
+# ============= ROBOT ARM  CONTROLLER=======================
+
+class RobotArmController():
+    # Contructor
+    def __init__(self,robotObject,**kwargs):
+        # Instantiate robot arm
+        self.robot = robotObject   
+
+        # ======================================
+        #   Publishers and Subsrcibers
+        # ======================================
+        # Set publishers and subscribers for robot controller
+        pubs = ["jState","cState"]
+        subs = ["jCmd","cCmd"]
+
+        # Add topics from **kwargs
+        self.topics = {}
         
+        for name,obj in kwargs.items():
+            self.topics[name] = obj
 
+        # Create dictionary for publishers and subscribers
+        self.publishers = {}
+        for key,item in self.topics.items():
+            if key in pubs:
+                self.publishers[key + "Pub"] = Publisher(item)
 
+        self.subscribers = {}
+        for key,item in self.topics.items():
+            if key in subs:
+                sub = self.subscribers[key + "Sub"] = Subscriber(key)
+                
+                # Subscribe to the topic
+                self.topics[key].addSubscriber(sub)
+        
+    # ======================================
+    #   Controller Attributes
+    # ======================================   
+         # I/O for GUI (Controller logic)
+        self.calibratedFlag = [False for _ in self.robot.links]
+        self.serialConnect = False
+        self.simulate = True
 
+        self.lastCmdID = 0
+
+        # Controller states
+        self.jointState = self.robot.jointPosition
+        self.poseState = self.robot.pose
+
+    # ======================================
+    #   Methods for Serial Communication
+    # ======================================
+
+    def connectSerial(self):
+        if "serialObj" not in self.__dict__:
+            try:
+                ser = serial.Serial(
+                    port = "/dev/cu.usbmodem21101",
+                    baudrate = 9600,
+                    timeout = 1)
+                self.serialObj = ser
+                self.serialConnect = True
+                msg = "CONNECTED"
+                return msg
+            except serial.SerialException as e:
+                print(f"Unable to connect: {e}")
+        else:
+            self.serialObj.open()
+            self.serialConnect = True
+            msg = "CONNECTED"
+            return msg
     
+    def disconnectSerial(self):
+        if "serialObj" not in self.__dict__:
+            msg = "Not connected. Cannot disconnect"
+            return msg
+        else:
+            self.serialObj.close()
+            self.serialConnect = False
+            msg = "Successfully disconnected"
+            return msg
     
+    def sendCommand(self,cmd):
+        self.serialObj.write((cmd + '\n').encode('utf-8'))
+        print("Sent",cmd)
+        while self.serialObj.in_waiting:
+            print(self.serialObj.readline().decode().strip())
+
+    # ====================================================
+    #   Methods for updating robot joint position and pose
+    # ====================================================
+    def publishCurrentState(self):
+        # Retrieve latest information about joint positions and pose from controller
+        jState = self.jointState
+        cState = self.poseState
+        # Publish state to topic
+        self.publishers["jStatePub"].publishMsg(jState)
+        self.publishers["cStatePub"].publishMsg(cState)
     
+    def updateJointState(self,q):
+        # Update information in robotArm object
+        self.robot.updateJoints(q) # Performs FK as well
+
+        # Update information on controller
+        self.jointState = self.robot.jointPosition.copy()
+
+        # Publish information to topic
+        self.publishers["jStatePub"].publishMsg(self.jointState)
+
+    def updatePoseState(self,q):
+        # Update information in robotArm object
+        self.robot.updateJoints(q) # Performs FK as well
+        
+        # Update information on controller
+        self.poseState = self.robot.pose.copy()
+
+        # Publish information to topic
+        self.publishers["cStatePub"].publishMsg(self.poseState) 
+    # ====================================================
+    #   Methods for Controller Looping
+    # ====================================================
+    
+    def updateController(self):
+        self.publishCurrentState()
+        #self.onJointCommand()
+
+    def onJointCommand(self):
+        # Read information from Joint Command
+        if self.subscribers["jCmdSub"].msg == None:
+            return
+        else:
+            msg = self.subscribers["jCmdSub"].msg
+            id = msg["cmdID"]
+            if self.lastCmdID == id:
+                return
+            else:
+                # Prepare Command String
+                if msg["joint"] == "all":
+                    cmdStr = f"{msg["cmdID"]}<{msg["mode"]},Q1:{msg["jointPositions"][0]},Q2:{msg["jointPositions"][1]},Q3:{msg["jointPositions"][2]},Q4:{msg["jointPositions"][3]}>"
+                else:
+                    cmdStr = f"{msg["cmdID"]}<{msg["mode"]},{msg["joint"]}:{msg["jogDistance"]}>"
+                    q = []
+                    for i in msg["jointPositions"]:
+                        i = float(i)
+                        q.append(i)
+      
+                print(cmdStr)
+                self.lastCmdID = id
+                

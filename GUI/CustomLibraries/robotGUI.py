@@ -1,12 +1,28 @@
 import sys
 import numpy as np
+import time
 
 from PyQt6.QtWidgets import (
-    QApplication, QMainWindow, QTabWidget, QWidget,
+    QMainWindow, QTabWidget, QWidget,
     QPushButton, QLineEdit,QTextEdit, QLabel,
     QVBoxLayout,QHBoxLayout,QGridLayout,
     QGroupBox
 )
+
+from PyQt6.QtCore import QRunnable, QThreadPool, QTimer, pyqtSlot
+
+from .RobotCommunications import Publisher,Subscriber
+#, ActionClient,ActionServer
+class ControlWorker(QRunnable):
+    def __init__(self,robotController):
+        super().__init__()
+        self.controller = robotController
+    "Worker Thread"
+    @pyqtSlot()
+    def run(self):
+        while True:
+            self.controller.updateController()
+            time.sleep(0.02) # 50 Hz
 
 class RobotGUI(QMainWindow):
     def __init__(self,robotObject,robotController, **kwargs):
@@ -15,15 +31,43 @@ class RobotGUI(QMainWindow):
         # Create Robot and Robot Controller Instance
         self.robot = robotObject
         self.controller = robotController
+        self.controlLoop = ControlWorker(self.controller)
+        self.stateTimer = QTimer()
+        self.stateTimer.setInterval(1000) # ms
+        self.stateTimer.timeout.connect(self.updateStates)
+        self.stateTimer.start()
+        # self.client = ActionClient("test")
+        # self.server = ActionServer("test")
+        # self.client.connectToServer(self.server)
+    # ======================================
+    #   Publishers and Subsrcibers
+    # ======================================
+        # Set publishers and subscribers for robot controller
+        subs = ["jState","cState"]
+        pubs = ["jCmd","cCmd"]
 
-        # Create attributes for topics
+       # Add topics from **kwargs
+        self.topics = {}
+
         for name,obj in kwargs.items():
-            setattr(self,name,obj)
+            self.topics[name] = obj
 
+        # Create dictionary for publishers and subscribers
+        self.publishers = {}
+        for key,item in self.topics.items():
+            if key in pubs:
+                self.publishers[key + "Pub"] = Publisher(item)
+
+        self.subscribers = {}
+        for key,item in self.topics.items():
+            if key in subs:
+                sub = self.subscribers[key + "Sub"] = Subscriber(key)
+                # Subscribe to the topic
+                self.topics[key].addSubscriber(sub)
+    
         # Create logger Count
         self.logCount = 0
         self.cmdID = 0
-
 
         # Establish Dictionary Keys
         GROUP = ["Robot Control", 
@@ -51,15 +95,26 @@ class RobotGUI(QMainWindow):
         # Check if button clicked
 
         for _, buttonGroupDict in self.buttonDict["Joint Space Control"].items():
-            buttonGroupDict["button"].clicked.connect(self.sendJogCommand)
+            buttonGroupDict["button"].clicked.connect(self.jointSpaceGoalRequest)
 
         for _, buttonGroupDict in self.buttonDict["Cartesian Control"].items():
-            buttonGroupDict["button"].clicked.connect(self.sendCartCommand)
+            buttonGroupDict["button"].clicked.connect(self.publishcJogCommand)
 
-        self.buttonDict["Robot Control"]["CONNECT"]["button"].clicked.connect(self.connect)
+        # self.buttonDict["Robot Control"]["CONNECT"]["button"].clicked.connect(self.controller.connectSerial)
         self.buttonDict["Robot Control"]["DISCONNECT"]["button"].clicked.connect(self.disconnect)
         self.buttonDict["String Command"]["output"]["button"].clicked.connect(self.clearLog)
+        # self.buttonDict["Robot Control"]["TEST"]["button"].clicked.connect(self.client.sendGoal)
+    # ======================================
+    #   Multi-Threading
+    # ======================================
+        # Create ThreadPool and Timer
+        self.timer = QTimer()
+        self.timer.setInterval(1000)
+        self.timer.start()
 
+        self.threadpool = QThreadPool()
+
+        self.threadpool.start(self.controlLoop)
 # ==================================================================  
 #     METHODS TO CREATE PANELS IN MAIN TAB 
 # ==================================================================     
@@ -144,7 +199,7 @@ class RobotGUI(QMainWindow):
         # Button Dictionary
         rcDict = {}
 
-        for name in ["CONNECT","DISCONNECT"]:
+        for name in ["TEST","CONNECT","DISCONNECT"]:
             btn = QPushButton(name)
             rcDict[name] = {}
             rcDict[name]["button"] = btn
@@ -154,11 +209,10 @@ class RobotGUI(QMainWindow):
 
         return container, rcDict
 
-
     def createCCtrlGroup(self):
         container = QGroupBox("CARTESIAN CONTROL")
         layout = QGridLayout(container)
-
+ 
         # Button Dictionary
         cCtrlDict = {}
 
@@ -352,50 +406,51 @@ class RobotGUI(QMainWindow):
         else:
             self.updateLog("Already disconnected")
 
-    def sendJogCommand(self):
-        sender = self.sender()
+    def jointSpaceGoalRequest(self):
+        sender = self.sender() # Determine which button was preseed
 
-        # Update command ID
-        self.cmdID += 1
-
-        # Initilize jog parameters
+        # Initialize jog parameters
+        moveType = "Joint Space"
         joint = ""
         jogDistance = 0
         direction = 1
         jointPositions = []
+        mode = ""
 
-        # Search dictionary where button object is located and set jog parameters
+        # Search dictionary where button is located and set jog paramters
         for _, buttonGroupDict in self.buttonDict["Joint Space Control"].items():
             if buttonGroupDict["button"] == sender:
                 joint = buttonGroupDict["joint"]
                 if "direction" in buttonGroupDict:
                     direction= buttonGroupDict["direction"]
+                mode = "REL"
+                if joint == "all":
+                    mode = "ABS"
                 break
-        
         # Search textField dictionary to set jogDistance
         for key, textFieldDict in self.textBoxDict["Joint Space Control Settings"].items():
             if key == joint:
                 jogDistance = float(textFieldDict["Jog Increment"].text())
                 break
-        
+
         # Get Absolute Joint Position
         for j in ["Q1","Q2","Q3","Q4"]:
             qDes= self.textBoxDict["Joint Space Control Settings"][j]["Desired Position"].text()
             jointPositions.append(qDes)
-        
-        # Send Command
-        if joint == "all":
-            strCMD =f"<ABS, Q1:{jointPositions[0]},Q2:{jointPositions[1]},Q3:{jointPositions[2]},Q4:{jointPositions[3]}>"
-            self.updateLog(strCMD)
-            
 
-        else:
-            strCMD = f"REL,{joint}: {jogDistance * direction}"
-            if not self.controller.simulate:
-                self.controller.sendCommand(strCMD)
-            self.updateLog(strCMD)
+        goal = {
+            "moveType": moveType,
+            "mode": mode,
+            "joint": joint,
+            "jogDistance": jogDistance * direction,
+            "jointPositions": jointPositions,
+        }
+
+        print(goal)
+
+   
         
-    def sendCartCommand(self):
+    def publishcJogCommand(self):
         self.updateRobotState()
 
         self.cmdID += 1
@@ -407,7 +462,7 @@ class RobotGUI(QMainWindow):
         axis = ""
         jogDistance = 0
         direction = 1
-        poseStr = []
+        pose = []
 
         # Search button dictionary where button object is located and set jog parameters
         for _,buttonGroupDict in self.buttonDict["Cartesian Control"].items():
@@ -424,28 +479,48 @@ class RobotGUI(QMainWindow):
             if key == axis:
                 jogDistance = float(textBoxDict["Jog Increment"].text())
                 break
-        
-        # 1. Get Current Pose
-        # 2. Add increment the desired DOF
-        # 3. Inverse Kinematics
-        # 4. Command robot
 
         # Get lastet desired pose
         for DOF in ["X","Y","Z","φ"]:
             desPose = self.textBoxDict["Cartesian Control Settings"][DOF]["Desired Pose"].text()
-            poseStr.append(desPose)
+            pose.append(desPose)
         
-        pose = [float(item) for item in poseStr]
+        pose = [float(item) for item in pose]
         
-        if axis == "all":
-            Q1,Q2,Q3,Q4 = self.robot.scaraIK(pose[0],pose[1],pose[2],pose[3],'elbowUp')            
-            print(f"<{self.cmdID},ABS,q1:{Q1},q2:{Q2},q3:{Q3},q4:{Q4}>")
-        else:
-            print(f"{self.cmdID},REL,q{axis}:{direction * jogDistance}")
+        # Publish Cartesian Jog Message
+        pubMsg = {
+            "cmdID":self.cmdID,
+            "axis": axis,
+            "jogDistance": jogDistance * direction,
+            "pose": pose
+        }
+        self.publishers["cCmdPub"].publishMsg(pubMsg)
 
 # ==================================================================  
 #     METHODS TO TEXT FIELD BEHAVIORS
 # ==================================================================  
+    def updateStates(self):
+        # Read jState and cState subscribers
+        jState = self.subscribers["jStateSub"].msg
+        cState = self.subscribers["cStateSub"].msg
+        
+        # Update joint state fields in GUI
+        for i, (_,subDict) in enumerate(self.textBoxDict["Joint Space Control Settings"].items()):
+            subDict["Current Position"].setText(str(np.rad2deg(jState[i])))
+        
+        # Update pose state fields in GUI
+        for i, (_,subDict) in enumerate(self.textBoxDict["Cartesian Control Settings"].items()):
+            if i < 3:
+                pos = str(cState["POSITION"][i])
+                subDict["Current Pose"].setText(pos)
+            else:
+                angle = str(cState["ANGLE"])
+                subDict["Current Pose"].setText(angle)
+            
+
+    def onJointStateUpdate(self):
+        pass
+    
     def updateRobotState(self):
         # Update Current Cartesian Cartesian Position 
         pose = self.robot.pose["POSITION"]

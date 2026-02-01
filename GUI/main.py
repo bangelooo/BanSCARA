@@ -4,10 +4,16 @@ from PyQt6.QtWidgets import (
     QApplication
 )
 # Import Custom Libraries
-from CustomLibraries.robotGUI import RobotGUI
-from CustomLibraries.scaraFactory import createBanSCARA
-from CustomLibraries.RobotController import RobotController
-from CustomLibraries.PubSub import Topic,Publisher, Subscriber
+from CustomLibraries.RobotArmLibrary import (
+    createBanSCARA,
+    RobotArmController
+)
+from CustomLibraries.RobotCommunications import (
+    Topic
+)
+from CustomLibraries.RobotGUI import RobotGUI
+
+
 
 # Instantiate Robot
 robotArm = createBanSCARA()
@@ -19,10 +25,10 @@ jCmdTopic = Topic("joint_command")
 cCmdTopic = Topic("cart_command")
 
 # Instantiate Robot Controller
-robotControl = RobotController(robotArm,jState = jStateTopic,cState = cStateTopic)
+robotControl = RobotArmController(robotArm,jState = jStateTopic,cState = cStateTopic,jCmd = jCmdTopic, cCmd = cCmdTopic)
 
 app = QApplication(sys.argv)
-window = RobotGUI(robotArm,robotControl)
+window = RobotGUI(robotArm,robotControl,jState = jStateTopic,cState = cStateTopic,jCmd = jCmdTopic, cCmd = cCmdTopic)
 window.show()
 
 app.exec()
