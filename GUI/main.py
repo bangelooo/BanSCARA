@@ -3,32 +3,43 @@ import sys
 from PyQt6.QtWidgets import (
     QApplication
 )
+
+import numpy as np 
+
 # Import Custom Libraries
 from CustomLibraries.RobotArmLibrary import (
     createBanSCARA,
     RobotArmController
 )
 from CustomLibraries.RobotCommunications import (
-    Topic
+    Topic,
+    Action,
+    ActionClient
 )
 from CustomLibraries.RobotGUI import RobotGUI
-
-
 
 # Instantiate Robot
 robotArm = createBanSCARA()
 
 # Create shared topics
-jStateTopic = Topic("joint_state")
-cStateTopic = Topic("cartesian_state")
-jCmdTopic = Topic("joint_command")
-cCmdTopic = Topic("cart_command")
+jStateTopic = Topic("jState")
+cStateTopic = Topic("cState")
+
+topicsList = [jStateTopic,cStateTopic]
+
+# Create shared Actions
+jCmdAction = Action("jCmd")
+cCmdAction = Action("cCmd")
+
+actionsList = [jCmdAction,cCmdAction]
+serviceList = []
 
 # Instantiate Robot Controller
-robotControl = RobotArmController(robotArm,jState = jStateTopic,cState = cStateTopic,jCmd = jCmdTopic, cCmd = cCmdTopic)
+robotControl = RobotArmController(robotArm,topicsList,serviceList,actionsList)
 
 app = QApplication(sys.argv)
-window = RobotGUI(robotArm,robotControl,jState = jStateTopic,cState = cStateTopic,jCmd = jCmdTopic, cCmd = cCmdTopic)
+window = RobotGUI(robotArm,robotControl,topicsList,serviceList,actionsList)
+
 window.show()
 
 app.exec()

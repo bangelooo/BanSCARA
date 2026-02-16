@@ -11,7 +11,12 @@ from PyQt6.QtWidgets import (
 
 from PyQt6.QtCore import QRunnable, QThreadPool, QTimer, pyqtSlot
 
-from .RobotCommunications import Publisher,Subscriber
+from .RobotCommunications import (
+    Publisher,
+    Subscriber,
+    ActionClient
+    )
+
 #, ActionClient,ActionServer
 class ControlWorker(QRunnable):
     def __init__(self,robotController):
@@ -25,7 +30,7 @@ class ControlWorker(QRunnable):
             time.sleep(0.02) # 50 Hz
 
 class RobotGUI(QMainWindow):
-    def __init__(self,robotObject,robotController, **kwargs):
+    def __init__(self,robotObject,robotController,topicList,serviceList,actionList):
         super().__init__()
 
         # Create Robot and Robot Controller Instance
@@ -36,21 +41,19 @@ class RobotGUI(QMainWindow):
         self.stateTimer.setInterval(1000) # ms
         self.stateTimer.timeout.connect(self.updateStates)
         self.stateTimer.start()
-        # self.client = ActionClient("test")
-        # self.server = ActionServer("test")
-        # self.client.connectToServer(self.server)
-    # ======================================
-    #   Publishers and Subsrcibers
-    # ======================================
+
+        # ======================================
+        #   Publishers and Subscribers
+        # ======================================
         # Set publishers and subscribers for robot controller
         subs = ["jState","cState"]
         pubs = ["jCmd","cCmd"]
 
-       # Add topics from **kwargs
+       # Create toics dictionary
         self.topics = {}
 
-        for name,obj in kwargs.items():
-            self.topics[name] = obj
+        for topicObj in topicList:
+            self.topics[topicObj.name] = topicObj
 
         # Create dictionary for publishers and subscribers
         self.publishers = {}
@@ -64,6 +67,25 @@ class RobotGUI(QMainWindow):
                 sub = self.subscribers[key + "Sub"] = Subscriber(key)
                 # Subscribe to the topic
                 self.topics[key].addSubscriber(sub)
+    
+        # ======================================
+        #   Action Clients and Action Servers
+        # ======================================
+        # Set action clients for robot controller
+        actionClients = ["jCmd","cCmd"]
+
+        # Create dictionary for actions
+        self.actions = {}
+
+        for actionObj in actionList:
+            self.actions[actionObj.name] = actionObj
+        
+        # Create dictionary for action clients
+        self.actionClients = {}
+
+        for key,item in self.actions.items():
+            if key in actionClients:
+                self.actionClients[key + "Client"] = ActionClient(item)
     
         # Create logger Count
         self.logCount = 0
@@ -95,15 +117,15 @@ class RobotGUI(QMainWindow):
         # Check if button clicked
 
         for _, buttonGroupDict in self.buttonDict["Joint Space Control"].items():
-            buttonGroupDict["button"].clicked.connect(self.jointSpaceGoalRequest)
+            buttonGroupDict["button"].clicked.connect(self.sendJCmdGoalRequest)
 
         for _, buttonGroupDict in self.buttonDict["Cartesian Control"].items():
             buttonGroupDict["button"].clicked.connect(self.publishcJogCommand)
 
-        # self.buttonDict["Robot Control"]["CONNECT"]["button"].clicked.connect(self.controller.connectSerial)
+        self.buttonDict["Robot Control"]["CONNECT"]["button"].clicked.connect(self.controller.connectSerial)
         self.buttonDict["Robot Control"]["DISCONNECT"]["button"].clicked.connect(self.disconnect)
         self.buttonDict["String Command"]["output"]["button"].clicked.connect(self.clearLog)
-        # self.buttonDict["Robot Control"]["TEST"]["button"].clicked.connect(self.client.sendGoal)
+
     # ======================================
     #   Multi-Threading
     # ======================================
@@ -405,8 +427,8 @@ class RobotGUI(QMainWindow):
             self.updateLog(msg)
         else:
             self.updateLog("Already disconnected")
-
-    def jointSpaceGoalRequest(self):
+    
+    def sendJCmdGoalRequest(self):
         sender = self.sender() # Determine which button was preseed
 
         # Initialize jog parameters
@@ -427,6 +449,7 @@ class RobotGUI(QMainWindow):
                 if joint == "all":
                     mode = "ABS"
                 break
+        
         # Search textField dictionary to set jogDistance
         for key, textFieldDict in self.textBoxDict["Joint Space Control Settings"].items():
             if key == joint:
@@ -438,6 +461,9 @@ class RobotGUI(QMainWindow):
             qDes= self.textBoxDict["Joint Space Control Settings"][j]["Desired Position"].text()
             jointPositions.append(qDes)
 
+        # Convert goal attributes to the correct data type
+        jointPositions = [float(x) for x in jointPositions]
+
         goal = {
             "moveType": moveType,
             "mode": mode,
@@ -445,10 +471,10 @@ class RobotGUI(QMainWindow):
             "jogDistance": jogDistance * direction,
             "jointPositions": jointPositions,
         }
+        print(f"Type moveType:{moveType} | mode: {mode} | joint: {joint} | Jog Distance: {jogDistance * direction} | jointPositions: {jointPositions}")
+        print(f"Type moveType:{type(moveType)} | mode: {type(mode)} | joint: {type(joint)} | Jog Distance: {type(jogDistance * direction)} | jointPositions: {type(jointPositions[0])}")
 
-        print(goal)
-
-   
+        self.actionClients["jCmdClient"].sendGoalRequest(goal)   
         
     def publishcJogCommand(self):
         self.updateRobotState()
@@ -511,16 +537,13 @@ class RobotGUI(QMainWindow):
         # Update pose state fields in GUI
         for i, (_,subDict) in enumerate(self.textBoxDict["Cartesian Control Settings"].items()):
             if i < 3:
-                pos = str(cState["POSITION"][i])
+                pos = str(round(cState["POSITION"][i],2))
                 subDict["Current Pose"].setText(pos)
             else:
-                angle = str(cState["ANGLE"])
+                angle = round(np.rad2deg(cState["ANGLE"]),2)
+                angle = str(angle)
                 subDict["Current Pose"].setText(angle)
-            
-
-    def onJointStateUpdate(self):
-        pass
-    
+        
     def updateRobotState(self):
         # Update Current Cartesian Cartesian Position 
         pose = self.robot.pose["POSITION"]

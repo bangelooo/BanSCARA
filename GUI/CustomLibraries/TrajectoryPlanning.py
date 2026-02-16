@@ -178,13 +178,25 @@ class TrapezoidalTrajectory():
             self.vMax *= -1 # Change direction 
         else:
             self.vMax *= 1 # Keep direction
-        print(f"Initial velocity: {self.vMax}")
+        #print(f"Initial velocity: {self.vMax}")
         # Methods to get parameters needed to generate trajectory
-        self._getTrajParameters()
-        self._getBlendPosition()
 
-        # Store Trajectory
-        self.trajectory = self.calcTrajProfile()
+        if (self.pEnd - self.pStart == 0.0):
+            self.tTotal = 1.0 # seconds
+            self.acc = 0
+            self.timeVec = np.linspace(0,self.tTotal,self.stepSize)
+            position = np.full(shape=self.stepSize,fill_value=self.pEnd)
+            velocity = np.zeros(self.stepSize)
+            acceleration = np.zeros(self.stepSize)
+            self.trajectory = [position,velocity,acceleration]
+            print("Trajectory constant")
+
+        else:
+            self._getTrajParameters()
+            self._getBlendPosition()
+
+            # Store Trajectory
+            self.trajectory = self.calcTrajProfile()
 
     # ======== METHODS TO GET TRAJECTORY PARAMETERS =======
     def _getTrajParameters(self):
@@ -195,41 +207,41 @@ class TrapezoidalTrajectory():
         x = 2 - 2 * self.mtnRulePcn
         self.tTotal = ((2 * totTrav) / spdMax) / x
 
-        print(f"Initial travel time {self.tTotal}")
+        #print(f"Initial travel time {self.tTotal}")
         
         # Get accleration time
         self.tAcc = self.mtnRulePcn * self.tTotal
-        print(f"Initial accleration time: {self.tAcc}")
+        #print(f"Initial accleration time: {self.tAcc}")
         
         # Check for max acceleration. Update motion time if exceeeded.
         acc = self.vMax / self.tAcc # Keep in mind direction
-        print(f"Initial acceleration: {acc}")
+        #print(f"Initial acceleration: {acc}")
 
         self.acc = acc # Initial attribute creation
         if abs(acc) > abs(self.maxAcc):
-            print("========== Warning! Exceeded max acceleration. Calculating new trajectory.==========")
+            #print("========== Warning! Exceeded max acceleration. Calculating new trajectory.==========")
             accMag = abs(self.maxAcc)
             
             # Re-calculate total time
             tTotal = np.sqrt(totTrav / ((1 - self.mtnRulePcn) * accMag * self.mtnRulePcn))
             self.tTotal = tTotal
-            print(f"New travel time: {tTotal}")
+            #print(f"New travel time: {tTotal}")
 
             # Re-calculate acceleration time
             self.tAcc = self.mtnRulePcn * self.tTotal
-            print(f"New acceleration time: {self.tAcc}")
+            #print(f"New acceleration time: {self.tAcc}")
             if (self.pStart >= self.pEnd):
                 self.acc = -1 * accMag
         
             else:
                 self.acc = accMag
 
-            print(f"New Acceleration:{self.acc}")
+            #print(f"New Acceleration:{self.acc}")
 
             # Calculate velocity
             self.vMax = self.acc * self.tAcc
 
-            print(f"New velocity: {self.vMax}")
+            #print(f"New velocity: {self.vMax}")
 
         self.timeVec = np.linspace(0,self.tTotal,self.stepSize)
     

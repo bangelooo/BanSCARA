@@ -2,21 +2,28 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import serial
-
+from enum import Enum
+import time
 # Import Custom Libraries
-from .RobotCommunications import Publisher,Subscriber
+from .RobotCommunications import (
+    Publisher,
+    Subscriber,
+    ActionClient,
+    ActionServer
+    )
 from .TrajectoryPlanning import TrapezoidalTrajectory
 
 # ============= ROBOT LINK ======================
 class RobotLink():
     # Constructor
-    def __init__(self,alpha,a,d,theta,jointType,dhType,*args):
+    def __init__(self,alpha,a,d,theta,jointType,dhType,name:str,*args):
         self.alpha = alpha
         self.a = a
         self.theta = theta
         self.d = d
         self.jointType = jointType
         self.dhType = dhType
+        self.name = name
 
 # ============= ROBOT ARM =======================
 class RobotArm():
@@ -402,10 +409,10 @@ def createBanSCARA():
     d4 = 1
 
     # Declare Links using Standard DH paramters
-    link1 = RobotLink(0,0,L1,0,"prismatic","std")
-    link2 = RobotLink(0,L2,0,0,"revolute","std")
-    link3 = RobotLink(0,L3,0,0,"revolute","std")
-    linkEE = RobotLink(-np.pi,L4,d4,0,"revolute","std")
+    link1 = RobotLink(0,0,L1,0,"prismatic","std", "q1")
+    link2 = RobotLink(0,L2,0,0,"revolute","std", "q2")
+    link3 = RobotLink(0,L3,0,0,"revolute","std", "q3")
+    linkEE = RobotLink(-np.pi,L4,d4,0,"revolute","std", "q4")
 
 
     # Group robot links
@@ -417,53 +424,109 @@ def createBanSCARA():
     return scaraRobot
 
 # ============= ROBOT ARM  CONTROLLER=======================
+class MachineState(Enum):
+    # Modelled after PackML 
+    RESETTING = 1
+    IDLE = 2
+    STARTING = 3
+    EXECUTING = 4
+    COMPLETING = 5
+    COMPLETE = 6
+    ABORTING = 7
+    ABORTED = 8
+    CLEARING = 9
+    STOPPING = 10
+    STOPPED = 11
+
+    SUSPENDING = 12
+    SUSPENDED = 13
+    UNSUSPENDING = 14
+
+    HOLDING = 15
+    HELD = 16
+    UNHOLDING = 17
+
+class OperatingMode(Enum):
+    OPERATION = 1
+    SIMULATION = 2
 
 class RobotArmController():
     # Contructor
-    def __init__(self,robotObject,**kwargs):
-        # Instantiate robot arm
+    def __init__(self,robotObject,topicsList,serviceList,actionsList):        # Instantiate robot arm
         self.robot = robotObject   
 
         # ======================================
-        #   Publishers and Subsrcibers
+        #   Publishers and Subscribers
         # ======================================
         # Set publishers and subscribers for robot controller
         pubs = ["jState","cState"]
-        subs = ["jCmd","cCmd"]
+        subs = []
 
-        # Add topics from **kwargs
+        # Add topics from topicsList
         self.topics = {}
         
-        for name,obj in kwargs.items():
-            self.topics[name] = obj
+        for topicObj in topicsList:
+            self.topics[topicObj.name] = topicObj
 
         # Create dictionary for publishers and subscribers
         self.publishers = {}
+
         for key,item in self.topics.items():
             if key in pubs:
                 self.publishers[key + "Pub"] = Publisher(item)
 
-        self.subscribers = {}
-        for key,item in self.topics.items():
-            if key in subs:
-                sub = self.subscribers[key + "Sub"] = Subscriber(key)
+        # self.subscribers = {}
+        # for key,item in self.topics.items():
+        #     if key in subs:
+        #         sub = self.subscribers[key + "Sub"] = Subscriber(key)
                 
-                # Subscribe to the topic
-                self.topics[key].addSubscriber(sub)
+        #         # Subscribe to the topic
+        #         self.topics[key].addSubscriber(sub)
         
-    # ======================================
-    #   Controller Attributes
-    # ======================================   
-         # I/O for GUI (Controller logic)
-        self.calibratedFlag = [False for _ in self.robot.links]
-        self.serialConnect = False
-        self.simulate = True
+        # ======================================
+        #   Action Servers
+        # ======================================
+        actionServers = ["jCmd","cCmd"]
 
-        self.lastCmdID = 0
+        # Create dictionary of Actions and Action Servers
+        self.actions = {}
+
+        for actionObj in actionsList:
+            self.actions[actionObj.name] = actionObj
+
+        self.actionServers = {}
+
+        for actionObj in actionsList:
+            if actionObj.name in actionServers:
+                self.actionServers[actionObj.name + "Server"] = ActionServer(actionObj)
+        
+        # Assign goal handler functions 
+        try:
+            self.actionServers["jCmdServer"].assignGHF(self.jSpaceGRH)
+        except:
+            print("Action does not exist")
+    
+        # ======================================
+        #   Controller Attributes
+        # ======================================   
+        # Logic
+        self.operatingMode = OperatingMode.OPERATION
+        self.serialConnect = False  
+        self.calibrationState = [False for _ in self.robot.links]
 
         # Controller states
+        self.robotState = MachineState.STOPPED
         self.jointState = self.robot.jointPosition
         self.poseState = self.robot.pose
+
+        # Attributes for trajectory
+        self.trajTargets = {"J-Space": {}, "C-Space": {}}
+        self._initalizeTrajTargets()
+
+        self.trajectoryList = [0] * len(self.robot.links)
+
+        # Attributes for tracking commands
+        self.cmdID = 0
 
     # ======================================
     #   Methods for Serial Communication
@@ -504,9 +567,138 @@ class RobotArmController():
         while self.serialObj.in_waiting:
             print(self.serialObj.readline().decode().strip())
 
+    def initializeRobot(self):
+        self.robotState = MachineState.RESETTING
+        print(self.robotState)
+        self.robotState = MachineState.IDLE
+        print(self.robotState)
+
+    # ====================================================
+    #   Methods for Actions
+    # ====================================================
+    def jSpaceGRH(self,goal,finishGoal,feedbackPub,resultRequestCB):
+        # Step 1: Extract data from goal message
+        mode = goal["mode"]
+        joint = goal["joint"]
+        jogDistance = goal["jogDistance"]
+        desiredPositions = goal["jointPositions"]
+        currentPosition = self.jointState
+        
+        # Step 2: Parse goal (in degrees) for Arduino command
+        arduinoCmd = self.parseMoveCommand(goal)
+
+        # Step 3: Convert desired positions and travel distance to radians
+        jogDistance = np.deg2rad(jogDistance)
+        desiredPositions = [np.deg2rad(x) for x in desiredPositions] # Covert joint angles from degrees to radians
+        
+        if mode == "REL":
+            index = int(joint[1]) - 1 
+            currentPosition[index] += jogDistance
+            desiredPositions = currentPosition 
+
+        # Step 4: Create Joint Trajectories
+        self.createTrajectories(desiredPositions,"J")
+
+        # Step 4: Send command to Arduino if in operation mode. 
+        if self.operatingMode == OperatingMode.OPERATION:
+            self.sendCommand(arduinoCmd)
+        print(arduinoCmd)
+        
+        # Step 5: Simulate Trajectory
+        try:
+            self.simulateTrajectory()
+        except:
+            return
+        
+        # Step 6: Return result after goal execution has finished
+        finishGoal(resultRequestCB)
+
+    def parseMoveCommand(self,goalMsg):
+        moveType = goalMsg["moveType"]
+        mode = goalMsg["mode"]
+        joint = goalMsg["joint"]
+        jogDistance = goalMsg["jogDistance"]
+        jointPositions = goalMsg["jointPositions"]
+
+        if moveType == "Joint Space":
+            if mode == "ABS":
+                arduinoString = f"{mode},Q1:{jointPositions[0]},Q2:{jointPositions[1]},Q3:{jointPositions[2]},Q4:{jointPositions[3]}"
+            elif mode == "REL":
+                arduinoString = f"{mode},{joint}:{jogDistance}>"
+
+        elif moveType == "Cartesian Space":
+            pass
+        
+        return arduinoString
+
+
+    # ====================================================
+    #   Methods trajectory generation and simulation
+    # ====================================================
+    def _initalizeTrajTargets(self):
+        for link in self.robot.links:
+            self.trajTargets["J-Space"][link.name] = {}
+            self.trajTargets["J-Space"][link.name]["Target Position"] = 0
+            self.trajTargets["J-Space"][link.name]["Target Speed"] = 0
+        
+        for DOF in ["X","Y","Z","","ψ(Yaw)","θ(Pitch)"," φ(Roll)"]:
+            self.trajTargets["C-Space"][DOF] = 0
+
+    def createTrajectories(self,desPosList,motionType:str = "J"):
+        if motionType == "J":
+            # Retrive current robot position
+            currentPos = self.robot.jointPosition
+            desPos = desPosList
+
+            # Create Trajectories for each joint
+            for i,_ in enumerate(desPos):
+                trajObj = TrapezoidalTrajectory(currentPos[i],desPos[i],1,100,"1/3")
+                self.trajectoryList[i] = trajObj
+        elif motionType == "C":
+            # Retrieve current robot Pose
+            pass
+    
+    def _getJointPosRT(self,t):
+        currPosList = []
+        for trajectory in self.trajectoryList:
+            currPosList.append(trajectory.positionRT(t))
+        return currPosList
+
+    def simulateTrajectory(self):
+        # Find longest travel time
+        travelTime = 0
+        for traj in self.trajectoryList:
+            if traj.tTotal > travelTime:
+                travelTime = traj.tTotal
+        print(f"{round(travelTime,2)} seconds")
+
+        currentJointPosition = [0] * len(self.trajectoryList)
+
+        # Start Timer
+        baseTime = time.monotonic()
+        elapsedTime = time.monotonic() - baseTime
+        
+        while elapsedTime <= travelTime:
+            for i,traj in enumerate(self.trajectoryList):
+                position = np.interp(elapsedTime,traj.timeVec, traj.trajectory[0])
+                # Update robot joint position
+                currentJointPosition[i] = position
+                currPosFloatList = [float(x) for x in currentJointPosition] # Convert numpy float to float
+            self.updateJointState(currPosFloatList)
+            elapsedTime = time.monotonic() - baseTime # Update elapsed time
+            time.sleep(0.1) 
+        
+        for i,traj in enumerate(self.trajectoryList):
+            position = np.interp(elapsedTime,traj.timeVec, traj.trajectory[0])
+            currentJointPosition[i] = position
+            currPosFloatList = [float(x) for x in currentJointPosition] # Convert numpy float to float
+        self.updateJointState(currPosFloatList)
+         
+
     # ====================================================
     #   Methods for updating robot joint position and pose
     # ====================================================
+
     def publishCurrentState(self):
         # Retrieve latest information about joint positions and pose from controller
         jState = self.jointState
@@ -517,51 +709,44 @@ class RobotArmController():
     
     def updateJointState(self,q):
         # Update information in robotArm object
-        self.robot.updateJoints(q) # Performs FK as well
+        self.robot.updateJoints("ABS",q) # Performs FK as well
 
         # Update information on controller
         self.jointState = self.robot.jointPosition.copy()
-
-        # Publish information to topic
-        self.publishers["jStatePub"].publishMsg(self.jointState)
-
-    def updatePoseState(self,q):
-        # Update information in robotArm object
-        self.robot.updateJoints(q) # Performs FK as well
-        
-        # Update information on controller
         self.poseState = self.robot.pose.copy()
 
-        # Publish information to topic
-        self.publishers["cStatePub"].publishMsg(self.poseState) 
     # ====================================================
     #   Methods for Controller Looping
     # ====================================================
     
     def updateController(self):
         self.publishCurrentState()
-        #self.onJointCommand()
+        self.checkForGoalRequests()
 
-    def onJointCommand(self):
-        # Read information from Joint Command
-        if self.subscribers["jCmdSub"].msg == None:
-            return
-        else:
-            msg = self.subscribers["jCmdSub"].msg
-            id = msg["cmdID"]
-            if self.lastCmdID == id:
-                return
-            else:
-                # Prepare Command String
-                if msg["joint"] == "all":
-                    cmdStr = f"{msg["cmdID"]}<{msg["mode"]},Q1:{msg["jointPositions"][0]},Q2:{msg["jointPositions"][1]},Q3:{msg["jointPositions"][2]},Q4:{msg["jointPositions"][3]}>"
-                else:
-                    cmdStr = f"{msg["cmdID"]}<{msg["mode"]},{msg["joint"]}:{msg["jogDistance"]}>"
-                    q = []
-                    for i in msg["jointPositions"]:
-                        i = float(i)
-                        q.append(i)
+    def checkForGoalRequests(self):
+        for _,item in self.actionServers.items():
+            item.handleGoalRequest()
+            
+
+    # def onJointCommand(self):
+    #     # Read information from Joint Command
+    #     if self.subscribers["jCmdSub"].msg == None:
+    #         return
+    #     else:
+    #         msg = self.subscribers["jCmdSub"].msg
+    #         id = msg["cmdID"]
+    #         if self.lastCmdID == id:
+    #             return
+    #         else:
+    #             # Prepare Command String
+    #             if msg["joint"] == "all":
+    #                 cmdStr = f"{msg["cmdID"]}<{msg["mode"]},Q1:{msg["jointPositions"][0]},Q2:{msg["jointPositions"][1]},Q3:{msg["jointPositions"][2]},Q4:{msg["jointPositions"][3]}>"
+    #             else:
+    #                 cmdStr = f"{msg["cmdID"]}<{msg["mode"]},{msg["joint"]}:{msg["jogDistance"]}>"
+    #                 q = []
+    #                 for i in msg["jointPositions"]:
+    #                     i = float(i)
+    #                     q.append(i)
       
-                print(cmdStr)
-                self.lastCmdID = id
-                
+                # print(cmdStr)
+                # self.lastCmdID = id

@@ -53,6 +53,7 @@ import threading
 class ServerState(Enum):
     READY = 1
     BUSY = 2
+    CANCELLING = 3
 
 class Service:
     def __init__(self, serviceName:str):
@@ -111,6 +112,7 @@ class Action:
     def __init__(self,actionName:str):
         self.name = actionName
         self.goalQueue = []
+        self.cancelQueue = []
         self.feedbackTopic = Topic(f"{actionName} Action - Feedback")
 
     
@@ -144,7 +146,7 @@ class ActionClient:
     
         :param response: Goal response from the Action Server.
         """
-        print(f"Server response: {response}")
+        print(f"{self.action.name} Server response: {response}")
         if response == "ACK":
             # Set goal accepted flag
             self.goalAccepted = True
@@ -160,21 +162,35 @@ class ActionClient:
     #   Methods for cancel request and registered callbacks
     # =================================================== 
     def sendCancelRequest(self,goalID):
-        pass
+        print("Cancel requested by client.")
+        self.action.cancelQueue.append(("CANCEL",goalID))
 
     def _cancelResponseCB(self):
         pass
     
     
 class ActionServer:
-    def __init__(self,action: Action,requestHndlrFcn):
+    def __init__(self,action: Action):
         self.action = action
         self.actionServerState = ServerState.READY
         self.workingThread = None
-        self.requestHndlrFcn = requestHndlrFcn
+        self.goalHndlrFcn = None
+        self.cancelEvent = threading.Event()
 
         # Feedback topic
         self.feedbackPub = Publisher(self.action.feedbackTopic)
+    
+    def assignGHF(self,goalHndlrFcn):
+        """
+        Assign a request handl
+        
+        :param self: Description
+        :param requestHndlrFcn: Description
+        """
+        if self.goalHndlrFcn == None:
+            self.goalHndlrFcn = goalHndlrFcn
+
+        
     # =============================================
     #   Methods to process and handle goal reqeusts
     # =============================================   
@@ -197,16 +213,27 @@ class ActionServer:
             self.actionServerState = ServerState.BUSY
             print(self.actionServerState)
             self.executeGoal(request,resultRequestCB)
-        else:
+        elif self.action.goalQueue:
             _,responseCB = self.action.goalQueue.pop(0)
             response = "NACK"
             responseCB(response)
+        else:
+            return
 
     def executeGoal(self,request,resultRequestCB):
         # Handle Request 
-        fcn = self.requestHndlrFcn
+        fcn = self.goalHndlrFcn
         # Start desired function on a thread and register callbacks for goal result and feedback
-        self.workingThread = threading.Thread(target = fcn,args = (request,self._finishGoal,self.publishFeedback,resultRequestCB),daemon = False)
+        self.workingThread = threading.Thread(
+            target = fcn,
+            args = (
+                request,
+                self._finishGoal,
+                self.publishFeedback,
+                resultRequestCB,
+                #self.cancelEvent,
+                ),
+            daemon = False)
         print("Executing the goal...")
         self.workingThread.start()
     
@@ -230,4 +257,7 @@ class ActionServer:
     #   Methods to process and handle cancel reqeusts
     # =============================================   
     def handleCancelRequest(self):
-        pass
+        if self.action.cancelQueue and self.actionServerState == ServerState.BUSY:
+            self.action.cancelQueue.pop(0)
+            print("Server received cancel request")
+            self.cancelEvent.set()
