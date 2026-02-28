@@ -1,49 +1,62 @@
 #include "motorBasic.h"
 
 // Define I/O
-#define stepPin 3   // STEP pin for motor 1
-#define dirPin 2    // DIRECTION pin for motor 1
+#define stepPin   3     // STEP pin for motor 1
+#define dirPin    2     // DIRECTION pin for motor 1
 
-#define stepPin2 9  // STEP pin for motor 2
-#define dirPin2  8  // DIRECTION pin for motor 1
+#define stepPin2  9     // STEP pin for motor 2
+#define dirPin2   8     // DIRECTION pin for motor 2
 
-#define stepPin3 11
-#define dirPin3 10
+#define stepPin3  11    // STEP pin for motor 3
+#define dirPin3   10    // DIRECTION pin for motor 3
+
+#define stepPin4  13    // STEP pin for motor 4
+#define dirPin4   12    //  DIRECTION pin for motor 4
 
 #define ms1Pin 7  // Microstepping 1
 #define ms2Pin 6  // Microstepping 2
+
+#define mtrEnablePin  4
 
 // Create AccelStepper instance in driverMode
 AccelStepper mtr(AccelStepper::DRIVER,stepPin,dirPin);
 AccelStepper mtr2(AccelStepper::DRIVER,stepPin2,dirPin2);
 AccelStepper mtr3(AccelStepper::DRIVER,stepPin3,dirPin3);
-AccelStepper *mtrs[]={&mtr,&mtr2,&mtr3};
-
+AccelStepper mtr4(AccelStepper::DRIVER,stepPin4,dirPin4);
+AccelStepper *mtrs[]={&mtr,&mtr2,&mtr3,&mtr4};
+ 
 
 // Create instance of axis parameters
-axisPar mtrPar1(1,19,microStepMode::half);
-axisPar mtrPar2(2,20,microStepMode::half);
-axisPar mtrPar3(3,20,microStepMode::half);
-axisPar *mtrPars[] = {&mtrPar1,&mtrPar2,&mtrPar3}; 
+microStepMode stepMode = microStepMode::half;
+axisPar mtrPar1(1,19,stepMode);
+axisPar mtrPar2(2,20,stepMode);
+axisPar mtrPar3(3,20,stepMode);
+axisPar mtrPar4(4,76,stepMode);
+
+axisPar *mtrPars[] = {&mtrPar1,&mtrPar2,&mtrPar3,&mtrPar4}; 
 
 // Create instance of motorBasic
 motorBasic mtrBasic1;
 motorBasic mtrBasic2;
 motorBasic mtrBasic3;
-motorBasic *mtrBasics[] = {&mtrBasic1,&mtrBasic2,&mtrBasic3};
+motorBasic mtrBasic4;
+
+motorBasic *mtrBasics[] = {&mtrBasic1,&mtrBasic2,&mtrBasic3,&mtrBasic4};
+
 
 // Global variables
 String robotCmd = "";
 bool stringComplete{0};
 bool stringError{0};
 bool cmdRequest{0};
-const int numJoints = 3;
+const int numJoints = 4;
+bool motorEnable{0};
 
 
 // Robot variables
-long qPos[numJoints]  = {0,0,0};
-long qdot[numJoints]  = {0,0,0};
-long qDist[numJoints] = {0,0,0};
+long qPos[numJoints]  = {0,0,0,0};
+long qdot[numJoints]  = {0,0,0,0};
+long qDist[numJoints] = {0,0,0,0};
 moveMode mode = moveMode::moveIdle;
 
 unsigned long startTime;
@@ -91,21 +104,23 @@ void setup()
   
   for(auto mo:mtrs)
   {
-    mo->setMaxSpeed(1500);
-    mo->setAcceleration(2000);
+    mo->setMaxSpeed(2500);
+    mo->setAcceleration(2500);
 
   }
 
+  // Set motor enable pin
+  pinMode(mtrEnablePin,OUTPUT);
+  digitalWrite(mtrEnablePin,HIGH);
 }
 
 void loop() 
 {
-
-
   // 1. Prompt user for a robot command
   if(!cmdRequest)
   {
-    Serial.println("READY.");
+    Serial.print("READY. Current mode.");
+    Serial.println((int)mode);
     cmdRequest = true;
   }
   // 2. Check if new serial input;
@@ -137,6 +152,13 @@ void loop()
     // Serial.println(loopTime);
   }
 
+  if (motorEnable)
+  {
+    digitalWrite(mtrEnablePin,LOW);
+  } else
+  {
+    digitalWrite(mtrEnablePin,HIGH);  
+  }
 
    //4. Motion Logic
    switch(mode)
@@ -146,7 +168,7 @@ void loop()
         {
           mtrBasics[i]->moveAbsolute(*mtrs[i],*mtrPars[i],qPos[i],5);
         }
-        if(allMotorsIdle()) mode = moveMode::moveIdle; // <-- reset when done
+        if(allMotorsIdle()) mode = moveMode::moveIdle;
         break;
       
       case moveMode::moveRelative:
@@ -156,14 +178,13 @@ void loop()
         }
         if(allMotorsIdle()) 
         {
-          
           for(auto i = 0; i < numJoints; ++i)
           {
             qPos[i] = mtrPars[i]->stepToDeg(mtrs[i]->currentPosition());
             qDist[i] = 0;
             mtrBasics[i]->moveRequested = false;
           }
-          mode = moveMode::moveIdle; // <-- reset when done
+          mode = moveMode::moveIdle;
         }
         break;
       
@@ -175,16 +196,18 @@ void loop()
         }
         break;
 
-
       case moveMode::moveStopping:
         for(auto i = 0; i < numJoints; ++i)
         {
           mtrBasics[i]->stopMotor(*mtrs[i],*mtrPars[i]);
-
+        }
+        for(auto i = 0; i < numJoints; ++i)
+        { 
           long steps = mtrs[i]->currentPosition();
           qPos[i] = mtrPars[i]->stepToDeg(steps);
           mtrPars[i]->qPosDes = qPos[i];
         }
+        if(allMotorsIdle()) mode = moveMode::moveIdle;
         break;
       case moveMode::moveHoming:
           mtrBasics[0]->mtrCal(*mtrs[0],*mtrPars[0]);
@@ -194,11 +217,7 @@ void loop()
       default:
         break;
    }
-
-
-
 } 
-
 
 bool allMotorsIdle() {
   for(auto i = 0; i < numJoints; ++i) {
@@ -246,9 +265,16 @@ void parseRbtCmd(String cmd)
     String token = cmd.substring(fromIndex,nextComma);
     token.toLowerCase();
     token.trim();
-    
 
-    if(token.startsWith("home"))
+    if(token.startsWith("motoron"))
+    {
+      motorEnable = 1;
+    }
+    else if(token.startsWith("motoroff"))
+    {
+      motorEnable = 0;
+    }
+    else if(token.startsWith("home"))
     {
       if(!modeSet)
       {
@@ -336,6 +362,24 @@ void parseRbtCmd(String cmd)
             break;
           case moveMode::moveVelocity:
             qdot[2] = token.substring(3).toFloat();
+            break;
+        }
+      }
+    } else if(token.startsWith("q4"))
+    {
+      if(modeSet)
+      {
+        switch(mode)
+        {
+          case moveMode::moveAbsolute:
+            qPos[3] = token.substring(3).toFloat();
+            break;
+          case moveMode::moveRelative:
+            qDist[3] = token.substring(3).toFloat();
+            mtrBasic4.qSets = true;
+            break;
+          case moveMode::moveVelocity:
+            qdot[3] = token.substring(3).toFloat();
             break;
         }
       }
