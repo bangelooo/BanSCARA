@@ -51,6 +51,7 @@ bool stringError{0};
 bool cmdRequest{0};
 const int numJoints = 4;
 bool motorEnable{0};
+bool indexMotor[numJoints] = {0,0,0,0};
 
 
 // Robot variables
@@ -209,10 +210,24 @@ void loop()
         }
         if(allMotorsIdle()) mode = moveMode::moveIdle;
         break;
+
       case moveMode::moveHoming:
-          mtrBasics[0]->mtrCal(*mtrs[0],*mtrPars[0]);
-          mtrBasics[1]->mtrCal(*mtrs[1],*mtrPars[1]);
-          mtrBasics[2]->mtrCal(*mtrs[2],*mtrPars[2]);
+        for(auto i = 0; i < numJoints; i++)
+        {
+          if (indexMotor[i] == 1)
+          {
+            mtrBasics[i]->mtrCal(*mtrs[i],*mtrPars[i]);
+          }
+        }
+          // mtrBasics[0]->mtrCal(*mtrs[0],*mtrPars[0]);
+          // mtrBasics[1]->mtrCal(*mtrs[1],*mtrPars[1]);
+          // mtrBasics[2]->mtrCal(*mtrs[2],*mtrPars[2]);
+
+        // Reset Motor Index Enable
+        for(auto i = 0; i < numJoints; i++)
+        {
+          indexMotor[i] = 0;
+        }
         break;
       default:
         break;
@@ -266,11 +281,11 @@ void parseRbtCmd(String cmd)
     token.toLowerCase();
     token.trim();
 
-    if(token.startsWith("motoron"))
+    if(token.startsWith("motorson"))
     {
       motorEnable = 1;
     }
-    else if(token.startsWith("motoroff"))
+    else if(token.startsWith("motorsoff"))
     {
       motorEnable = 0;
     }
@@ -280,10 +295,10 @@ void parseRbtCmd(String cmd)
       {
         mode = moveMode::moveHoming;
         modeSet = true;
-        for(auto i = 0; i < numJoints; ++i)
-        {
-          mtrBasics[i]->isCalibrating = true;
-        }
+        // for(auto i = 0; i < numJoints; ++i)
+        // {
+        //   mtrBasics[i]->isCalibrating = true;
+        // }
       }
     }
     // Set operation mode
@@ -327,6 +342,9 @@ void parseRbtCmd(String cmd)
           case moveMode::moveVelocity:
             qdot[0] = token.substring(3).toFloat();
             break;
+          case moveMode::moveHoming:
+            indexMotor[0] = 1;
+            break;
         }
       }
     } else if(token.startsWith("q2"))
@@ -344,6 +362,9 @@ void parseRbtCmd(String cmd)
             break;
           case moveMode::moveVelocity:
             qdot[1] = token.substring(3).toFloat();
+            break;
+          case moveMode::moveHoming:
+            indexMotor[1] = 1;
             break;
         }
       }
@@ -363,6 +384,9 @@ void parseRbtCmd(String cmd)
           case moveMode::moveVelocity:
             qdot[2] = token.substring(3).toFloat();
             break;
+          case moveMode::moveHoming:
+            indexMotor[2] = 1;
+            break;
         }
       }
     } else if(token.startsWith("q4"))
@@ -380,6 +404,9 @@ void parseRbtCmd(String cmd)
             break;
           case moveMode::moveVelocity:
             qdot[3] = token.substring(3).toFloat();
+            break;
+          case moveMode::moveHoming:
+            indexMotor[3] = 1;
             break;
         }
       }

@@ -62,9 +62,14 @@ void motorBasic::moveRelative(AccelStepper &mtr, axisPar &mtrPar, float distance
 // ========================= VELOCITY MOVE =========================
 void motorBasic::moveVelocity(AccelStepper &mtr, axisPar &mtrPar,float speed,float test)
 {
-  mtrPar.qDotDes = mtrPar.rpmToStepsPerSec(speed);
-  mtr.setSpeed(mtrPar.qDotDes);
-  mtr.runSpeed();
+  if(!moveRequested)
+  {
+    mtrPar.qDotDes = mtrPar.rpmToStepsPerSec(speed);
+    mtr.setSpeed(mtrPar.qDotDes);
+    moveRequested = true;
+  }
+  
+  if(moveRequested) mtr.runSpeed();
 
 }
 
