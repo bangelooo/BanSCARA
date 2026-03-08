@@ -8,6 +8,7 @@ class cycloidalMotionCAM:
         self.betaFall = fallAngle
         self.dwellAtRise = dwellAtRise
         self.thetaFall = self.betaRise + self.dwellAtRise
+        self.driveMechType = "CAM"
         self._displacementMap()
 
     def _camDisplacement(self,angle):
@@ -70,7 +71,7 @@ class cycloidalMotionCAM:
         self.riseMap = np.array(riseMap)
         self.fallMap = np.array(fallMap)
     
-    def findJointAngle(self,yDesired):
+    def findAngle(self,yDesired):
         if (yDesired < 0) or (yDesired > self.h):
             return print(f"Desired value {yDesired} is out of range.")
         else:
@@ -82,3 +83,7 @@ class cycloidalMotionCAM:
             desiredAngle = np.interp(yDesired,rmY,rmAngle)
             
             return desiredAngle
+
+
+
+

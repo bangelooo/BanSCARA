@@ -12,12 +12,11 @@ from .RobotCommunications import (
     ActionServer
     )
 from .TrajectoryPlanning import TrapezoidalTrajectory
-from .cam import cycloidalMotionCAM
 
 # ============= ROBOT LINK ======================
 class RobotLink():
     # Constructor
-    def __init__(self,alpha,a,d,theta,jointType,dhType,name:str,driveMechanism:str = "DIRECT",*args):
+    def __init__(self,alpha,a,d,theta,jointType,dhType,name:str,*args):
         self.alpha = alpha
         self.a = a
         self.theta = theta
@@ -25,14 +24,6 @@ class RobotLink():
         self.jointType = jointType
         self.dhType = dhType
         self.name = name
-        self.driveMechanism = driveMechanism
-        self.driveMechObj = None
-
-    def addDriveMechansimObj(self,dmObj):
-        if self.driveMechanism == dmObj.driveMechType:
-            self.driveMechObj = dmObj
-        else:
-            print("Mechanism type does not match")
 
 # ============= ROBOT ARM =======================
 class RobotArm():
@@ -189,8 +180,6 @@ class RobotArm():
 
         # CALCULATE D1
         d1 = z - L[1] - d[4]
-
-        d1 = self.links[0].driveMechObj.findAngle(d1)
         
         # Calculate P3X and P3Y
         p3x = x - L[4] * np.cos(phi)
@@ -416,19 +405,16 @@ class RobotArm():
 
 def createBanSCARA():
     # Declare robot link parametrs 
-    L1,L2,L3,L4 = 0,191,191,0
-    d4 = 0
+    L1,L2,L3,L4 = 1,191,191,0
+    d4 = 1
 
     # Declare Links using Standard DH paramters
-    link1 = RobotLink(0,0,L1,0,"prismatic","std","q1",driveMechanism="CAM")
+    link1 = RobotLink(0,0,L1,0,"prismatic","std", "q1")
     link2 = RobotLink(0,L2,0,0,"revolute","std", "q2")
     link3 = RobotLink(0,L3,0,0,"revolute","std", "q3")
     linkEE = RobotLink(-np.pi,L4,d4,0,"revolute","std", "q4")
 
-    # Create CAM for joint 1
-    q1CAM = cycloidalMotionCAM(45,25,90,90,180)
-    link1.addDriveMechansimObj(q1CAM)
-    
+
     # Group robot links
     robotlinks = [link1,link2,link3,linkEE]
 
@@ -463,11 +449,6 @@ class MachineState(Enum):
 class OperatingMode(Enum):
     OPERATION = 1
     SIMULATION = 2
-
-class IndexMode(Enum):
-    DIRECT = 1
-    HARDSTOP = 2
-    TOFLAG = 3
 
 class RobotArmController():
     # Contructor
@@ -505,7 +486,7 @@ class RobotArmController():
         # ======================================
         #   Action Servers
         # ======================================
-        actionServers = ["jCmd","cCmd","calCmd"]
+        actionServers = ["jCmd","cCmd"]
 
         # Create dictionary of Actions and Action Servers
         self.actions = {}
@@ -522,26 +503,21 @@ class RobotArmController():
         # Assign goal handler functions 
         try:
             self.actionServers["jCmdServer"].assignGHF(self.jSpaceGRH)
-            self.actionServers["cCmdServer"].assignGHF(self.cSpaceGRH)
-            self.actionServers["calCmdServer"].assignGHF(self.indexGRH)
         except:
-            print("There is an action that does not exist")
+            print("Action does not exist")
     
         # ======================================
         #   Controller Attributes
         # ======================================   
         # Logic
-        self.operatingMode = OperatingMode.SIMULATION
+        self.operatingMode = OperatingMode.OPERATION
         self.serialConnect = False  
         self.calibrationState = [False for _ in self.robot.links]
-        self.motorsOn = False
 
         # Controller states
         self.robotState = MachineState.STOPPED
         self.jointState = self.robot.jointPosition
         self.poseState = self.robot.pose
-        self.desiredElbOri = "elbowDown"
-        self.indexingMode = IndexMode.DIRECT
 
         # Attributes for trajectory
         self.trajTargets = {"J-Space": {}, "C-Space": {}}
@@ -551,10 +527,6 @@ class RobotArmController():
 
         # Attributes for tracking commands
         self.cmdID = 0
-
-
-        # Robot Routine
-
 
     # ======================================
     #   Methods for Serial Communication
@@ -574,13 +546,11 @@ class RobotArmController():
             except serial.SerialException as e:
                 print(f"Unable to connect: {e}")
         else:
-            try:
-                self.serialObj.open()
-                self.serialConnect = True
-                msg = "CONNECTED"
-                return msg
-            except serial.SerialException as e:
-                print(f"Port already open: {e}")
+            self.serialObj.open()
+            self.serialConnect = True
+            msg = "CONNECTED"
+            return msg
+    
     def disconnectSerial(self):
         if "serialObj" not in self.__dict__:
             msg = "Not connected. Cannot disconnect"
@@ -629,7 +599,7 @@ class RobotArmController():
         # Step 4: Create Joint Trajectories
         self.createTrajectories(desiredPositions,"J")
 
-        # Step 5: Send command to Arduino if in operation mode. 
+        # Step 4: Send command to Arduino if in operation mode. 
         if self.operatingMode == OperatingMode.OPERATION:
             self.sendCommand(arduinoCmd)
         print(arduinoCmd)
@@ -642,143 +612,25 @@ class RobotArmController():
         
         # Step 6: Return result after goal execution has finished
         finishGoal(resultRequestCB)
-    
-    def cSpaceGRH(self,goal,finishGoal,feedbackPub,resultRequstCB):
-        # Step 1: Extract data from goal message
-        moveType = goal["moveType"]
-        mode = goal["mode"]
-        axis = goal["axis"]
-        jogDistance = goal["jogDistance"]
-        desiredPose = goal["pose"]
-        
-
-        # Step 2: Obtain current robot pose
-        currentXYZ = self.poseState["POSITION"]
-        currentPHI = self.poseState["ANGLE"]
-        currentPose = [currentXYZ,currentPHI]
-        currentPose = np.concatenate([np.atleast_1d(item) for item in currentPose]).tolist()
-
-
-        axisToIndex = {"X":0,"Y":1,"Z":2,"φ":3}
-
-        if mode == "REL":
-            currentPose[axisToIndex[axis]] += jogDistance
-            desiredPose = currentPose
-                
-        # Step 3: Extract cartesian coordinates for robot IK
-        x = desiredPose[0]
-        y = desiredPose[1]
-        z = desiredPose[2]
-        phi = desiredPose[3]
-
-        # Step 4: Perfrom inverse kinematics
-        q1,q2,q3,q4 = self.robot.scaraIK(x,y,z,phi,self.desiredElbOri)
-
-        desiredPositions = [q1,q2,q3,q4]
-        print(desiredPositions)
-
-        # Re-construct goal for parsing
-        goal = {
-            "moveType": moveType,
-            "mode": "ABS",
-            "jointPositions": desiredPositions,
-            }
-
-        arduinoCmd = self.parseMoveCommand(goal)
-
-        desiredPositions = [np.deg2rad(x) for x in desiredPositions] # Covert joint angles from degrees to radians
-
-        # Step 5: Create Joint Trajectories
-        self.createTrajectories(desiredPositions,"J")
-
-
-        # Step 4: Send command to Arduino if in operation mode. 
-        if self.operatingMode == OperatingMode.OPERATION:
-           self.sendCommand(arduinoCmd)
-        print(arduinoCmd)
-        
-        # Step 5: Simulate Trajectory
-        try:
-            self.simulateTrajectory()
-        except:
-            return
-
-        finishGoal(resultRequstCB)
 
     def parseMoveCommand(self,goalMsg):
-        # Extract Move Type
         moveType = goalMsg["moveType"]
-        
-        # Joint Space Goal Parsing
-        if moveType == "Joint Space":
-            mode = goalMsg["mode"]
-            joint = goalMsg["joint"]
-            jogDistance = goalMsg["jogDistance"]
-            jointPositions = goalMsg["jointPositions"]
+        mode = goalMsg["mode"]
+        joint = goalMsg["joint"]
+        jogDistance = goalMsg["jogDistance"]
+        jointPositions = goalMsg["jointPositions"]
 
+        if moveType == "Joint Space":
             if mode == "ABS":
                 arduinoString = f"{mode},Q1:{jointPositions[0]},Q2:{jointPositions[1]},Q3:{jointPositions[2]},Q4:{jointPositions[3]}"
             elif mode == "REL":
                 arduinoString = f"{mode},{joint}:{jogDistance}>"
 
-        # Cartesian Space Goal Pasrsing
         elif moveType == "Cartesian Space":
-            mode = goalMsg["mode"]
-            jointPositions = goalMsg["jointPositions"]
-            arduinoString = f"{mode},Q1:{jointPositions[0]},Q2:{jointPositions[1]},Q3:{jointPositions[2]},Q4:{jointPositions[3]}"
+            pass
+        
         return arduinoString
 
-    def toggleOpMode(self):
-        if self.operatingMode == OperatingMode.OPERATION:
-            self.operatingMode = OperatingMode.SIMULATION
-            print("Controller now in SIMULATION MODE")
-            return
-        elif self.operatingMode == OperatingMode.SIMULATION:
-            self.operatingMode = OperatingMode.OPERATION
-            print("Controller now in OPERATION MODE")
-    
-    def toggleElbowOrient(self):
-        if self.desiredElbOri == "elbowDown":
-            self.desiredElbOri = "elbowUp"
-        else:
-            self.desiredElbOri = "elbowDown"
-    
-    def toggleMotorsOn(self):
-        if self.operatingMode == OperatingMode.OPERATION:
-            if self.motorsOn == False:
-                self.sendCommand("motorsOn")
-                self.motorsOn = True
-            else:
-                self.sendCommand("motorsOff")
-                self.motorsOn = False
-
-    def indexGRH(self,goal,finishGoal,feedbackPub,resultRequestCB):
-        # Step 1: Extract data from goal message
-        desiredMode = goal["Mode"]
-        axesToIndexDict = goal["Axes to Index"]
-        
-        # Step 2: Creat a string of the axes to index using a generator expression and the str.join() method
-        axesToIndexStr = ",".join(
-            axis for axis, enabled in axesToIndexDict.items() if enabled
-        )
-
-        # Step 3: Define Lookup Table
-        INDEX_MODE_LOOKUP = {mode.name: mode for mode in IndexMode}
-
-        # Step 4: Set current index mode
-        self.indexingMode = INDEX_MODE_LOOKUP.get(desiredMode)
-
-        # Step 5: Format Arduino String and send command to Arduino
-        arduinoCmd = f"HOME,{self.indexingMode.name},{axesToIndexStr}"
-
-        if self.operatingMode == OperatingMode.OPERATION:
-            self.sendCommand(arduinoCmd)
-            print(arduinoCmd)
-        else:
-            print(f"Simulation Arduino Command: {arduinoCmd}")
-        
-        # Step 6: Return result after goal execution has finished
-        finishGoal(resultRequestCB)
 
     # ====================================================
     #   Methods trajectory generation and simulation
@@ -800,7 +652,7 @@ class RobotArmController():
 
             # Create Trajectories for each joint
             for i,_ in enumerate(desPos):
-                trajObj = TrapezoidalTrajectory(currentPos[i],desPos[i],112.5,112.5,"1/3")
+                trajObj = TrapezoidalTrajectory(currentPos[i],desPos[i],1,100,"1/3")
                 self.trajectoryList[i] = trajObj
         elif motionType == "C":
             # Retrieve current robot Pose
@@ -874,19 +726,27 @@ class RobotArmController():
     def checkForGoalRequests(self):
         for _,item in self.actionServers.items():
             item.handleGoalRequest()
-    
-    def practiceRoutine(self):
-        try:
-            i = 0
-            while i < 5:
-                arduinoCMD = "ABS,Q1:90,Q3:-90"
-                self.sendCommand(arduinoCMD)
-                time.sleep(10)
-                arduinoCMD = "ABS,Q2:0,Q3:90"
-                self.sendCommand(arduinoCMD)
-                time.sleep(10)
-                i += 1
-            self.sendCommand("STOP")
-        except:
-            print("Unable to start Routine. Serial Communication not established.")
             
+
+    # def onJointCommand(self):
+    #     # Read information from Joint Command
+    #     if self.subscribers["jCmdSub"].msg == None:
+    #         return
+    #     else:
+    #         msg = self.subscribers["jCmdSub"].msg
+    #         id = msg["cmdID"]
+    #         if self.lastCmdID == id:
+    #             return
+    #         else:
+    #             # Prepare Command String
+    #             if msg["joint"] == "all":
+    #                 cmdStr = f"{msg["cmdID"]}<{msg["mode"]},Q1:{msg["jointPositions"][0]},Q2:{msg["jointPositions"][1]},Q3:{msg["jointPositions"][2]},Q4:{msg["jointPositions"][3]}>"
+    #             else:
+    #                 cmdStr = f"{msg["cmdID"]}<{msg["mode"]},{msg["joint"]}:{msg["jogDistance"]}>"
+    #                 q = []
+    #                 for i in msg["jointPositions"]:
+    #                     i = float(i)
+    #                     q.append(i)
+      
+                # print(cmdStr)
+                # self.lastCmdID = id

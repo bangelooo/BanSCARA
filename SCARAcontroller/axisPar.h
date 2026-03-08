@@ -24,7 +24,8 @@ enum class moveMode
 enum class homingMethod
 {
   directHome,
-  homeToFlag
+  homeToFlag,
+  hardStop,
 };
 
 class axisPar

@@ -53,6 +53,7 @@ const int numJoints = 4;
 bool motorEnable{0};
 bool indexMotor[numJoints] = {0,0,0,0};
 
+int commandID{0};
 
 // Robot variables
 long qPos[numJoints]  = {0,0,0,0};
@@ -103,7 +104,7 @@ void setup()
   mtr3.setPinsInverted(true,false,false);
 
   
-  for(auto mo:mtrs)
+  for(auto mo:mtrs) // Range Based For Loop
   {
     mo->setMaxSpeed(2500);
     mo->setAcceleration(2500);
@@ -219,9 +220,6 @@ void loop()
             mtrBasics[i]->mtrCal(*mtrs[i],*mtrPars[i]);
           }
         }
-          // mtrBasics[0]->mtrCal(*mtrs[0],*mtrPars[0]);
-          // mtrBasics[1]->mtrCal(*mtrs[1],*mtrPars[1]);
-          // mtrBasics[2]->mtrCal(*mtrs[2],*mtrPars[2]);
 
         // Reset Motor Index Enable
         for(auto i = 0; i < numJoints; i++)
@@ -299,6 +297,27 @@ void parseRbtCmd(String cmd)
         // {
         //   mtrBasics[i]->isCalibrating = true;
         // }
+      }
+    }
+    else if(token.startsWith("direct"))
+    {
+      for(auto i = 1; i < numJoints; i++)
+      {
+        mtrPars[i]->homeMethod = homingMethod::directHome;
+      }
+    }
+    else if(token.startsWith("hardstop"))
+    {
+      for(auto i = 1; i < numJoints; i++)
+      {
+        mtrPars[i]->homeMethod = homingMethod::hardStop;
+      }
+    }
+    else if(token.startsWith("toflag"))
+    {
+      for(auto i = 1; i < numJoints; i++)
+      {
+        mtrPars[i]->homeMethod = homingMethod::homeToFlag;
       }
     }
     // Set operation mode
@@ -485,6 +504,9 @@ void displayParameter()
     case moveMode::moveVelocity:
       Serial.print("Velocity");
       Serial.print("\n");
+      break;
+    case moveMode::moveHoming:
+      Serial.println("Homing");
       break;
   }
 

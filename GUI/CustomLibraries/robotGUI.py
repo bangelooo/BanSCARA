@@ -6,10 +6,12 @@ from PyQt6.QtWidgets import (
     QMainWindow, QTabWidget, QWidget,
     QPushButton, QLineEdit,QTextEdit, QLabel,
     QVBoxLayout,QHBoxLayout,QGridLayout,
-    QGroupBox
+    QCheckBox,
+    QGroupBox,
+    QButtonGroup
 )
 
-from PyQt6.QtCore import QRunnable, QThreadPool, QTimer, pyqtSlot
+from PyQt6.QtCore import QRunnable, QThreadPool, QTimer, pyqtSlot,Qt
 
 from .RobotCommunications import (
     Publisher,
@@ -17,7 +19,72 @@ from .RobotCommunications import (
     ActionClient
     )
 
-#, ActionClient,ActionServer
+
+# Widget Helper Classes
+def createToggleSwitchGroup(labelName):
+    toggleRow = QHBoxLayout()
+    toggleSwitch = ToggleSwitch()
+    lbl = QLabel(labelName)
+    
+    toggleRow.addWidget(lbl)
+    toggleRow.addWidget(toggleSwitch)
+
+    return toggleRow,toggleSwitch
+
+class ToggleSwitch(QCheckBox):
+    def __init__(self):
+        super().__init__()
+        self.setFixedSize(50,28)
+        self.setStyleSheet("""
+        QCheckBox {
+            background-color: #ccc;
+            border-radius: 14px;
+        }
+        QCheckBox::indicator {
+            width: 26px;
+            height: 26px;
+            border-radius: 13px;
+            background: white;
+            margin: 1px;
+        }
+        QCheckBox::indicator:checked {
+            margin-left: 22px;
+        }
+        QCheckBox:checked {
+            background-color: #4CAF50;
+        }
+        """)
+
+def createStatusLEDGroup(labelName):
+    statusLEDRow = QHBoxLayout()
+    statusLED = StatusLED()
+    lbl = QLabel(labelName)
+
+    statusLEDRow.addWidget(lbl)
+    statusLEDRow.addWidget(statusLED)
+
+    statusLEDRow.setAlignment(Qt.AlignmentFlag.AlignLeft)
+    statusLEDRow.setSpacing(6)
+    #statusLEDRow.addStretch()
+
+    return statusLEDRow, statusLED
+
+class StatusLED(QLabel):
+    def __init__(self,diameter = 18):
+        super().__init__()
+        self.diameter = diameter
+        self.setFixedSize(diameter, diameter)
+        self.setState(False)
+
+
+    def setState(self, state:bool):
+        color = "green" if state else "red"
+        self.setStyleSheet(f"""
+            background-color: {color};
+            border-radius: {self.diameter // 2}px;
+            border: 1px solid black;
+        """)
+
 class ControlWorker(QRunnable):
     def __init__(self,robotController):
         super().__init__()
@@ -27,7 +94,7 @@ class ControlWorker(QRunnable):
     def run(self):
         while True:
             self.controller.updateController()
-            time.sleep(0.02) # 50 Hz
+            #time.sleep(0.02) # 50 Hz
 
 class RobotGUI(QMainWindow):
     def __init__(self,robotObject,robotController,topicList,serviceList,actionList):
@@ -49,7 +116,7 @@ class RobotGUI(QMainWindow):
         subs = ["jState","cState"]
         pubs = ["jCmd","cCmd"]
 
-       # Create toics dictionary
+       # Create topics dictionary
         self.topics = {}
 
         for topicObj in topicList:
@@ -72,7 +139,7 @@ class RobotGUI(QMainWindow):
         #   Action Clients and Action Servers
         # ======================================
         # Set action clients for robot controller
-        actionClients = ["jCmd","cCmd"]
+        actionClients = ["jCmd","cCmd","calCmd"]
 
         # Create dictionary for actions
         self.actions = {}
@@ -115,17 +182,24 @@ class RobotGUI(QMainWindow):
         self.setCentralWidget(tabs)
 
         # Check if button clicked
-
         for _, buttonGroupDict in self.buttonDict["Joint Space Control"].items():
             buttonGroupDict["button"].clicked.connect(self.sendJCmdGoalRequest)
 
-        for _, buttonGroupDict in self.buttonDict["Cartesian Control"].items():
-            buttonGroupDict["button"].clicked.connect(self.publishcJogCommand)
+        for key, buttonGroupDict in self.buttonDict["Cartesian Control"].items():
+            if key != "ELBOW ORIENT":
+                buttonGroupDict["button"].clicked.connect(self.sendCCmdGoalRequest)
+
+        self.buttonDict["Cartesian Control"]["ELBOW ORIENT"]["button"].clicked.connect(self.onToggleElbowOrient)
 
         self.buttonDict["Robot Control"]["CONNECT"]["button"].clicked.connect(self.controller.connectSerial)
         self.buttonDict["Robot Control"]["DISCONNECT"]["button"].clicked.connect(self.disconnect)
         self.buttonDict["String Command"]["output"]["button"].clicked.connect(self.clearLog)
 
+        self.buttonDict["Robot Control"]["OPERATION MODE TOGGLE"]["button"].toggled.connect(self.controller.toggleOpMode)
+        self.buttonDict["Robot Control"]["START ROUTINE"]["button"].clicked.connect(self.controller.practiceRoutine)
+        self.buttonDict["Robot Control"]["MOTOR ON TOGGLE"]["button"].toggled.connect(self.controller.toggleMotorsOn)
+        
+        self.buttonDict["Robot Control"]["CALIBRATE"]["button"].clicked.connect(self.sendIndexGoalRequest)
     # ======================================
     #   Multi-Threading
     # ======================================
@@ -183,14 +257,18 @@ class RobotGUI(QMainWindow):
         rsLayout = QVBoxLayout(container)
 
         # Create Widget Groups
+        cSettingGroup,cSettingDict = self.createCalibrationSettingGroup()
         cStateGroup,cStateDict = self.createcStateGroup()
         jStateGroup,jStateDict = self.createjStateGroup()
 
         # Add desired dictionaries
+        self.buttonDict["Calibration Settings"] = cSettingDict
         self.textBoxDict["Cartesian Control Settings"] = cStateDict
         self.textBoxDict["Joint Space Control Settings"] = jStateDict
+        
 
         # Add lineEdit to desired dictionary
+        rsLayout.addWidget(cSettingGroup)
         rsLayout.addWidget(cStateGroup)
         rsLayout.addWidget(jStateGroup)
 
@@ -213,7 +291,59 @@ class RobotGUI(QMainWindow):
 
 # ==================================================================  
 #     METHODS TO CREATE GROUPINGS FOR PANELS
-# ==================================================================  
+# ================================================================== 
+    def createCalibrationSettingGroup(self):
+        container = QGroupBox("CALIBRATION SETTINGS")
+        layout = QVBoxLayout(container)
+        # Button Dictionary
+        csDict = {"AXIS":{},"TYPE":{}}
+        
+        # Row 1: Axes to Calibrate
+        calAxisRow = QHBoxLayout()
+        row1Lbl = QLabel("CALIBRATE AXIS")
+        calAxisRow.addWidget(row1Lbl)
+
+        for name in ["Q1","Q2","Q3","Q4"]:
+            btn = QPushButton(name)
+            btn.setCheckable(True)
+            csDict["AXIS"][name] = {}
+            csDict["AXIS"][name]["button"] = btn
+            calAxisRow.addWidget(btn)
+
+        # Row 2: Calibration Type 
+        calTypeRow = QHBoxLayout()
+        row2Lbl = QLabel("CALIBRATION TYPE")
+        calTypeRow.addWidget(row2Lbl)
+
+        calTypeBtnGroup = QButtonGroup(container)
+        calTypeBtnGroup.setExclusive(True)
+
+        for name in ["DIRECT","TO FLAG", "HARD STOP"]:
+            btn = QPushButton(name)
+            btn.setCheckable(True)
+            csDict["TYPE"][name] = {}
+            csDict["TYPE"][name]["button"] = btn
+            calTypeRow.addWidget(btn)
+            calTypeBtnGroup.addButton(btn)
+
+
+        # Row 3: Axes Calibrated
+        calStatusRow = QHBoxLayout()
+        calStatusLbl = QLabel("STATUS")
+        calStatusRow.addWidget(calStatusLbl)
+
+        for name in ["Q1", "Q2", "Q3", "Q4"]:
+            statusLEDGroup,statusLED = createStatusLEDGroup(name)
+            calStatusRow.addLayout(statusLEDGroup)
+
+        layout.addLayout(calStatusRow)
+        layout.addLayout(calAxisRow)
+        layout.addLayout(calTypeRow)
+
+        container.setLayout(layout)
+
+        return container,csDict
+
     def createRobotControlGroup(self):
         container = QGroupBox("ROBOT CONTROL")
         layout = QVBoxLayout(container)
@@ -221,7 +351,21 @@ class RobotGUI(QMainWindow):
         # Button Dictionary
         rcDict = {}
 
-        for name in ["TEST","CONNECT","DISCONNECT"]:
+        # Toggle Switch for Simulation
+        opModeRow,opModeToggle = createToggleSwitchGroup("OPERATION MODE")
+
+        layout.addLayout(opModeRow)
+        rcDict["OPERATION MODE TOGGLE"] = {}
+        rcDict["OPERATION MODE TOGGLE"]["button"] = opModeToggle
+
+        # Toggle Switch for Motors On
+        mtrOnRow,mtrOnToggle = createToggleSwitchGroup("MOTOR ON")
+
+        layout.addLayout(mtrOnRow)
+        rcDict["MOTOR ON TOGGLE"] = {}
+        rcDict["MOTOR ON TOGGLE"]["button"] = mtrOnToggle
+
+        for name in ["CONNECT","DISCONNECT","CALIBRATE","START ROUTINE","STOP ROUTINE"]:
             btn = QPushButton(name)
             rcDict[name] = {}
             rcDict[name]["button"] = btn
@@ -245,7 +389,17 @@ class RobotGUI(QMainWindow):
         cCtrlDict["GoToPose"]["button"] = goToPose
         cCtrlDict["GoToPose"]["DOF"] = "all"
 
-        for index, DOF in enumerate(["X","Y","Z","φ"],start = 1):
+
+        # Elbow Orientation Push Button
+        elbowOrient = QPushButton("ELBOW DOWN")
+        elbowOrient.setCheckable(True)
+        elbowOrient.setChecked(False)
+        cCtrlDict["ELBOW ORIENT"] = {}
+        cCtrlDict["ELBOW ORIENT"]["button"] = elbowOrient
+
+        layout.addWidget(elbowOrient,1,0,1,2)
+
+        for index, DOF in enumerate(["X","Y","Z","φ"],start = 2):
             for sign in ["-","+"]:
                 btn = QPushButton(DOF + sign)
                 cCtrlDict[DOF + sign] = {}
@@ -429,7 +583,7 @@ class RobotGUI(QMainWindow):
             self.updateLog("Already disconnected")
     
     def sendJCmdGoalRequest(self):
-        sender = self.sender() # Determine which button was preseed
+        sender = self.sender() # Determine which button was pressed
 
         # Initialize jog parameters
         moveType = "Joint Space"
@@ -475,29 +629,29 @@ class RobotGUI(QMainWindow):
         print(f"Type moveType:{type(moveType)} | mode: {type(mode)} | joint: {type(joint)} | Jog Distance: {type(jogDistance * direction)} | jointPositions: {type(jointPositions[0])}")
 
         self.actionClients["jCmdClient"].sendGoalRequest(goal)   
-        
-    def publishcJogCommand(self):
-        self.updateRobotState()
+    
+    def sendCCmdGoalRequest(self):
+        sender = self.sender() # Determine which button was pressed
 
-        self.cmdID += 1
-
-        # Identify pushed button
-        sender = self.sender()
-
-        # Intialize required variables
+        # Initialize cartesian jog paramters
+        moveType = "Cartesian Space"
         axis = ""
+        elbowOrient = ""
         jogDistance = 0
         direction = 1
         pose = []
+        mode = ""
 
-        # Search button dictionary where button object is located and set jog parameters
+        # Search dictionary where button is loacted and set jog parameters
         for _,buttonGroupDict in self.buttonDict["Cartesian Control"].items():
             if buttonGroupDict["button"] == sender:
                 axis = buttonGroupDict["DOF"]
                 if axis == "all":
                     direction = 0
+                    mode = "ABS"
                 elif "direction" in buttonGroupDict:
                     direction = buttonGroupDict["direction"]
+                    mode = "REL"
                 break
         
         # Search textBlock dictionary and set jog distance
@@ -505,22 +659,72 @@ class RobotGUI(QMainWindow):
             if key == axis:
                 jogDistance = float(textBoxDict["Jog Increment"].text())
                 break
-
-        # Get lastet desired pose
+        
+        # Get desired pose information
         for DOF in ["X","Y","Z","φ"]:
             desPose = self.textBoxDict["Cartesian Control Settings"][DOF]["Desired Pose"].text()
             pose.append(desPose)
         
+        # Convert data type
         pose = [float(item) for item in pose]
-        
-        # Publish Cartesian Jog Message
-        pubMsg = {
-            "cmdID":self.cmdID,
+
+        # Create Goal
+        goal = {
+            "moveType":moveType,
+            "mode": mode,
             "axis": axis,
             "jogDistance": jogDistance * direction,
             "pose": pose
         }
-        self.publishers["cCmdPub"].publishMsg(pubMsg)
+        print(goal)
+
+        self.actionClients["cCmdClient"].sendGoalRequest(goal)   
+
+    def onToggleElbowOrient(self):
+        sender = self.sender()      # Determine which button was pressed
+        toggled = sender.isChecked()
+        if toggled:
+            sender.setText("ELBOW UP")
+            self.controller.toggleElbowOrient()
+        else:
+            sender.setText("ELBOW DOWN")
+            self.controller.toggleElbowOrient()
+
+    def sendIndexGoalRequest(self):
+        sender = self.sender()  # Determine which button was pressed
+        
+        # Initialize Calibration Parameters
+        calType = ""
+        axesToIndex = {
+            "Q1": False,
+            "Q2": False,
+            "Q3": False,
+            "Q4": False
+        }
+        
+        # Check which
+        for calTypeKey,calTypeData in self.buttonDict["Calibration Settings"]["TYPE"].items():
+            button = calTypeData["button"]
+            if button.isChecked():
+                calType = calTypeKey
+                # Remove all white spaces
+                
+                break
+        calType =calType.replace(" ","")
+        # Check Axes to Calibrate
+        for axis,axisData in self.buttonDict["Calibration Settings"]["AXIS"].items():
+            button = axisData["button"]
+            if button.isChecked():
+                axesToIndex[axis] = True
+        
+        # Construct Goal
+        goal = {"Mode":calType,
+                "Axes to Index":axesToIndex}
+        
+        # Send Goal Request
+        print(f"Client Request: {goal}")
+
+        self.actionClients["calCmdClient"].sendGoalRequest(goal)  
 
 # ==================================================================  
 #     METHODS TO TEXT FIELD BEHAVIORS
@@ -532,7 +736,8 @@ class RobotGUI(QMainWindow):
         
         # Update joint state fields in GUI
         for i, (_,subDict) in enumerate(self.textBoxDict["Joint Space Control Settings"].items()):
-            subDict["Current Position"].setText(str(np.rad2deg(jState[i])))
+            state = round(np.rad2deg(jState[i]),2)
+            subDict["Current Position"].setText(str(state))
         
         # Update pose state fields in GUI
         for i, (_,subDict) in enumerate(self.textBoxDict["Cartesian Control Settings"].items()):

@@ -30,8 +30,10 @@ topicsList = [jStateTopic,cStateTopic]
 # Create shared Actions
 jCmdAction = Action("jCmd")
 cCmdAction = Action("cCmd")
+calCmdAction = Action("calCmd")
 
-actionsList = [jCmdAction,cCmdAction]
+
+actionsList = [jCmdAction,cCmdAction,calCmdAction]
 serviceList = []
 
 # Instantiate Robot Controller
@@ -43,4 +45,3 @@ window = RobotGUI(robotArm,robotControl,topicsList,serviceList,actionsList)
 window.show()
 
 app.exec()
-
