@@ -32,9 +32,10 @@ jCmdAction = Action("jCmd")
 cCmdAction = Action("cCmd")
 calCmdAction = Action("calCmd")
 gripObjAction = Action("gripCmd")
+releaseObjAction = Action("releaseCmd")
 
 
-actionsList = [jCmdAction,cCmdAction,calCmdAction,gripObjAction]
+actionsList = [jCmdAction,cCmdAction,calCmdAction,gripObjAction,releaseObjAction]
 serviceList = []
 
 # Instantiate Robot Controller

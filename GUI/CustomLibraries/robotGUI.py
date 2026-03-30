@@ -198,7 +198,7 @@ class RobotGUI(QMainWindow):
         #   Action Clients and Action Servers
         # ======================================
         # Set action clients for robot controller
-        actionClients = ["jCmd","cCmd","calCmd","gripCmd"]
+        actionClients = ["jCmd","cCmd","calCmd","gripCmd","releaseCmd"]
 
         # Create dictionary for actions
         self.actions = {}
@@ -260,6 +260,7 @@ class RobotGUI(QMainWindow):
         
         self.buttonDict["Robot Control"]["CALIBRATE"]["button"].clicked.connect(self.sendIndexGoalRequest)
         self.buttonDict["Robot Control"]["GRIP OBJECT"]["button"].clicked.connect(self.sendGripObjectGoalRequest)
+        self.buttonDict["Robot Control"]["RELEASE OBJECT"]["button"].clicked.connect(self.sendReleaseObjectGoalRequest)
     # ======================================
     #   Multi-Threading
     # ======================================
@@ -845,6 +846,29 @@ class RobotGUI(QMainWindow):
         # Step 5: Send Goal Request
         print(f"Client Request: {goal}")
         self.actionClients["gripCmdClient"].sendGoalRequest(goal)
+
+    
+    def sendReleaseObjectGoalRequest(self):
+        sender = self.sender()  # Determine which button was pressed
+
+        # Step 1: Initialize Grip Parameters
+        gripType = ""
+
+        # Step 2: Check which grip type is selected (Internal or External)
+        for eeGripTypeKey,eeGripTypeData in self.buttonDict["End Effector Settings"].items():
+            button = eeGripTypeData["button"]
+            if button.isChecked():
+                gripType = eeGripTypeKey
+                break
+
+        # Step 3: Construct Goal
+        goal = {
+            "GRIP TYPE": gripType,
+            }
+        
+        # Step 5: Send Goal Request
+        print(f"Client Request: {goal}")
+        self.actionClients["releaseCmdClient"].sendGoalRequest(goal)
 
 # ==================================================================  
 #     METHODS TO TEXT FIELD BEHAVIORS

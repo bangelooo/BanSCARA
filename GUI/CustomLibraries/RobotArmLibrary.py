@@ -591,7 +591,7 @@ class RobotArmController():
         # ======================================
         #   Action Servers
         # ======================================
-        actionServers = ["jCmd","cCmd","calCmd","gripCmd"]
+        actionServers = ["jCmd","cCmd","calCmd","gripCmd","releaseCmd"]
 
         # Create dictionary of Actions and Action Servers
         self.actions = {}
@@ -611,6 +611,7 @@ class RobotArmController():
             self.actionServers["cCmdServer"].assignGHF(self.cSpaceGRH)
             self.actionServers["calCmdServer"].assignGHF(self.indexGRH)
             self.actionServers["gripCmdServer"].assignGHF(self.gripObjGRH)
+            self.actionServers["releaseCmdServer"].assignGHF(self.releaseObjGRH)
         except:
             print("There is an action that does not exist")
     
@@ -828,7 +829,52 @@ class RobotArmController():
                 self.sendCommand("REL,Q4:-4")
                 time.sleep(2)
 
+                self.sendCommand("REL,Q4:2")
+                time.sleep(2)
+
+                # Reset Q4's Arduino Position
+                self.gripDiameter = round(float(desiredGripDiameter))
+                self.sendCommand(f"HOME,DIRECT,Q4:{str(q4)}")
+            
+        # Step 6: Return result after goal execution has finished
+        finishGoal(resultRequestCB)
+
+    def releaseObjGRH(self,goal,finishGoal,feedbackPub,resultRequestCB):
+        # Step 1: Extract data from goal message
+        gripType = goal["GRIP TYPE"]
+        
+        if gripType == "INTERNAL":
+            desiredGripDiameter = self.endEffector.MIN_GRIP_DIAMETER
+        elif gripType == "EXTERNAL":
+            desiredGripDiameter = self.endEffector.MAX_GRIP_DIAMETER
+
+        # Step 2: Capture current Grip Diameter and Q4 Angle
+        q4 = self.jointState[3]
+        currentGripDiameter = self.gripDiameter
+        print(f"Current Q4 Angle: {q4} | Current Grip Diameter{currentGripDiameter}")
+
+        # Step 3: Calculate relative distance the end effector must travel
+        q4RelativeTravel = self.endEffector.determineSunGearTravel(currentGripDiameter,float(desiredGripDiameter))
+        
+        if self.operatingMode == OperatingMode.OPERATION:
+            if gripType == "INTERNAL":
+                # Send Command to Activate Solenoid
+                self.sendCommand("solenoidon")
+                time.sleep(1)
+
+                # Send command to desired grip diameter
+                self.sendCommand(f"REL,Q4:{round(q4RelativeTravel)}")
+                time.sleep(10)
+
+                # Send Command to De-activate Solenoiid
+                self.sendCommand("solenoidoff")
+                time.sleep(1)
+
+                # Send command to help release solenoid pins from planet carrier slots.
                 self.sendCommand("REL,Q4:4")
+                time.sleep(2)
+
+                self.sendCommand("REL,Q4:-2")
                 time.sleep(2)
 
                 # Reset Q4's Arduino Position
