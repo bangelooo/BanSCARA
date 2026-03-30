@@ -18,6 +18,8 @@
 
 #define mtrEnablePin  4
 
+#define eeEnablePin 5
+
 // Create AccelStepper instance in driverMode
 AccelStepper mtr(AccelStepper::DRIVER,stepPin,dirPin);
 AccelStepper mtr2(AccelStepper::DRIVER,stepPin2,dirPin2);
@@ -59,7 +61,11 @@ int commandID{0};
 long qPos[numJoints]  = {0,0,0,0};
 long qdot[numJoints]  = {0,0,0,0};
 long qDist[numJoints] = {0,0,0,0};
+long qHome[numJoints] = {0,0,0,0};
 moveMode mode = moveMode::moveIdle;
+
+bool solenoidTrigger = 0;
+
 
 unsigned long startTime;
 unsigned long loopTime;
@@ -72,6 +78,10 @@ void setup()
   
   pinMode(ms1Pin, OUTPUT);
   pinMode(ms2Pin, OUTPUT);
+
+  // Set EE Enable Pin
+  pinMode(eeEnablePin,OUTPUT);
+  digitalWrite(eeEnablePin,LOW);
 
    /*  MS1   MS2   STEP
       H     L     1/2
@@ -114,6 +124,8 @@ void setup()
   // Set motor enable pin
   pinMode(mtrEnablePin,OUTPUT);
   digitalWrite(mtrEnablePin,HIGH);
+
+  
 }
 
 void loop() 
@@ -162,6 +174,10 @@ void loop()
     digitalWrite(mtrEnablePin,HIGH);  
   }
 
+  if (solenoidTrigger)
+    digitalWrite(eeEnablePin,HIGH);
+  else
+    digitalWrite(eeEnablePin,LOW);
    //4. Motion Logic
    switch(mode)
    {
@@ -217,7 +233,7 @@ void loop()
         {
           if (indexMotor[i] == 1)
           {
-            mtrBasics[i]->mtrCal(*mtrs[i],*mtrPars[i]);
+            mtrBasics[i]->mtrCal(*mtrs[i],*mtrPars[i],qHome[i]);
           }
         }
 
@@ -286,6 +302,14 @@ void parseRbtCmd(String cmd)
     else if(token.startsWith("motorsoff"))
     {
       motorEnable = 0;
+    }
+    else if(token.startsWith("solenoidon"))
+    {
+      solenoidTrigger = 1;
+    }
+    else if(token.startsWith("solenoidoff"))
+    {
+      solenoidTrigger = 0;
     }
     else if(token.startsWith("home"))
     {
@@ -363,6 +387,7 @@ void parseRbtCmd(String cmd)
             break;
           case moveMode::moveHoming:
             indexMotor[0] = 1;
+            qHome[0] = token.substring(3).toFloat();
             break;
         }
       }
@@ -384,6 +409,7 @@ void parseRbtCmd(String cmd)
             break;
           case moveMode::moveHoming:
             indexMotor[1] = 1;
+            qHome[1] = token.substring(3).toFloat();
             break;
         }
       }
@@ -405,6 +431,7 @@ void parseRbtCmd(String cmd)
             break;
           case moveMode::moveHoming:
             indexMotor[2] = 1;
+            qHome[2] = token.substring(3).toFloat();
             break;
         }
       }
@@ -426,6 +453,7 @@ void parseRbtCmd(String cmd)
             break;
           case moveMode::moveHoming:
             indexMotor[3] = 1;
+            qHome[3] = token.substring(3).toFloat();
             break;
         }
       }

@@ -31,9 +31,10 @@ topicsList = [jStateTopic,cStateTopic]
 jCmdAction = Action("jCmd")
 cCmdAction = Action("cCmd")
 calCmdAction = Action("calCmd")
+gripObjAction = Action("gripCmd")
 
 
-actionsList = [jCmdAction,cCmdAction,calCmdAction]
+actionsList = [jCmdAction,cCmdAction,calCmdAction,gripObjAction]
 serviceList = []
 
 # Instantiate Robot Controller

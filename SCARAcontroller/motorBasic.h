@@ -20,7 +20,7 @@ class motorBasic
   void moveVelocity(AccelStepper&, axisPar&,float,float);
   void stopMotor(AccelStepper&, axisPar&);
 
-  void mtrCal(AccelStepper&, axisPar&);
+  void mtrCal(AccelStepper&, axisPar&,float);
 
   private:
     bool relMoveDone;

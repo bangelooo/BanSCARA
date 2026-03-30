@@ -72,6 +72,8 @@ void motorBasic::moveVelocity(AccelStepper &mtr, axisPar &mtrPar,float speed,flo
   if(moveRequested) mtr.runSpeed();
 
 }
+
+
 // ========================= STOP MOTOR =========================
 void motorBasic::stopMotor(AccelStepper &mtr, axisPar &mtrPar)
 {
@@ -100,12 +102,13 @@ void motorBasic::stopMotor(AccelStepper &mtr, axisPar &mtrPar)
   
 }
 // ========================= HOMING =========================
-void motorBasic::mtrCal(AccelStepper &mtr, axisPar& mtrPar)
+void motorBasic::mtrCal(AccelStepper &mtr, axisPar& mtrPar,float position)
 {
   if (mtrPar.homeMethod == homingMethod::directHome)
   {
   mtrPar.qPosDes = 0;
-  mtr.setCurrentPosition(mtrPar.qPosDes);
+  float positionInSteps = mtrPar.degToStep(position);
+  mtr.setCurrentPosition(positionInSteps);
   }
   isCalibrating = false;
 }

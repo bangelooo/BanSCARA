@@ -8,7 +8,8 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,QHBoxLayout,QGridLayout,
     QCheckBox,
     QGroupBox,
-    QButtonGroup
+    QButtonGroup,
+    QSlider,
 )
 
 from PyQt6.QtCore import QRunnable, QThreadPool, QTimer, pyqtSlot,Qt
@@ -96,6 +97,64 @@ class ControlWorker(QRunnable):
             self.controller.updateController()
             #time.sleep(0.02) # 50 Hz
 
+class ValueSliderWidget(QWidget):
+    def __init__(self, minValue = 0, maxValue = 100, initial = 50,valueName = "Default",grouping = "Default", dictionary = None):
+        super().__init__()
+
+        self.minValue = minValue
+        self.maxValue = maxValue
+        self.valueName = valueName
+
+        layout = QHBoxLayout()
+
+        self.label = QLabel(valueName)
+        layout.addWidget(self.label)
+
+        # Line Edit for Manual Input
+        self.lineEdit = QLineEdit(str(initial))
+        layout.addWidget(self.lineEdit)
+
+        # Add Line Edit Widget to dictionary
+        dictionary[grouping] = {valueName:self.lineEdit}
+
+        # Slider
+        self.slider = QSlider(Qt.Orientation.Horizontal)
+        self.slider.setMinimum(minValue)
+        self.slider.setMaximum(maxValue)
+        layout.addWidget(self.slider)
+
+        self.setLayout(layout)
+
+        # =========== CONNECTIONS ====================
+        self.slider.valueChanged.connect(self.updateFromSlider)
+        self.lineEdit.editingFinished.connect(self.updateFromText)
+
+    def updateFromSlider(self,value):
+        """ Update text when slider moves"""
+        self.lineEdit.setText(str(value))
+
+    def updateFromText(self):
+        """Update slider when text changes"""
+        try:
+            value = int(self.lineEdit.text())
+
+            # Clamp Value
+            value = max(self.minValue, min(self.maxValue,value))
+
+            self.slider.setValue(value)
+            self.lineEdit.setText(str(value)) # Ensure a valid dipslay
+        except ValueError:
+            # Reset to Slider value if invalid input
+            self.lineEdit.setText(str(self.slider.value()))
+
+    def getValue(self):
+        return self.slider.value()
+
+    def set_value(self, value):
+        value = max(self.minValue, min(self.maxValue, value))
+        self.slider.setValue(value)
+
+# Robot GUI Main Window
 class RobotGUI(QMainWindow):
     def __init__(self,robotObject,robotController,topicList,serviceList,actionList):
         super().__init__()
@@ -139,7 +198,7 @@ class RobotGUI(QMainWindow):
         #   Action Clients and Action Servers
         # ======================================
         # Set action clients for robot controller
-        actionClients = ["jCmd","cCmd","calCmd"]
+        actionClients = ["jCmd","cCmd","calCmd","gripCmd"]
 
         # Create dictionary for actions
         self.actions = {}
@@ -200,6 +259,7 @@ class RobotGUI(QMainWindow):
         self.buttonDict["Robot Control"]["MOTOR ON TOGGLE"]["button"].toggled.connect(self.controller.toggleMotorsOn)
         
         self.buttonDict["Robot Control"]["CALIBRATE"]["button"].clicked.connect(self.sendIndexGoalRequest)
+        self.buttonDict["Robot Control"]["GRIP OBJECT"]["button"].clicked.connect(self.sendGripObjectGoalRequest)
     # ======================================
     #   Multi-Threading
     # ======================================
@@ -258,17 +318,20 @@ class RobotGUI(QMainWindow):
 
         # Create Widget Groups
         cSettingGroup,cSettingDict = self.createCalibrationSettingGroup()
+        eeSettingGroup,eeSettingDict = self.createEESettingGroup()
         cStateGroup,cStateDict = self.createcStateGroup()
         jStateGroup,jStateDict = self.createjStateGroup()
 
         # Add desired dictionaries
         self.buttonDict["Calibration Settings"] = cSettingDict
+        self.buttonDict["End Effector Settings"] = eeSettingDict
         self.textBoxDict["Cartesian Control Settings"] = cStateDict
         self.textBoxDict["Joint Space Control Settings"] = jStateDict
         
 
         # Add lineEdit to desired dictionary
         rsLayout.addWidget(cSettingGroup)
+        rsLayout.addWidget(eeSettingGroup)
         rsLayout.addWidget(cStateGroup)
         rsLayout.addWidget(jStateGroup)
 
@@ -291,7 +354,37 @@ class RobotGUI(QMainWindow):
 
 # ==================================================================  
 #     METHODS TO CREATE GROUPINGS FOR PANELS
-# ================================================================== 
+# ==================================================================
+    def createEESettingGroup(self):
+        container = QGroupBox("END EFFECTOR SETTINGS")
+        layout = QVBoxLayout(container)
+
+        # Button Dictionary
+        eeDict = {}
+
+        # Row: Grip Orientation
+        gripTypeRow = QHBoxLayout()
+        gripRowTypeLbl = QLabel ("GRIP ORIENTATION")
+        gripTypeRow.addWidget(gripRowTypeLbl)
+
+        gripTypeBtnGroup = QButtonGroup(container)
+        gripTypeBtnGroup.setExclusive(True)
+
+        for name in ["INTERNAL", "EXTERNAL"]:
+            btn = QPushButton(name)
+            btn.setCheckable(True)
+            eeDict[name] = {}
+            eeDict[name]["button"] = btn
+            gripTypeRow.addWidget(btn)
+            gripTypeBtnGroup.addButton(btn)
+
+        valueRow = ValueSliderWidget(15,110,15,"GRIP DIAMETER (mm)","End Effector Control",self.textBoxDict)
+
+        layout.addLayout(gripTypeRow)
+        layout.addWidget(valueRow)
+
+        return container,eeDict
+
     def createCalibrationSettingGroup(self):
         container = QGroupBox("CALIBRATION SETTINGS")
         layout = QVBoxLayout(container)
@@ -365,7 +458,7 @@ class RobotGUI(QMainWindow):
         rcDict["MOTOR ON TOGGLE"] = {}
         rcDict["MOTOR ON TOGGLE"]["button"] = mtrOnToggle
 
-        for name in ["CONNECT","DISCONNECT","CALIBRATE","START ROUTINE","STOP ROUTINE"]:
+        for name in ["CONNECT","DISCONNECT","CALIBRATE","GRIP OBJECT","RELEASE OBJECT","START ROUTINE","STOP ROUTINE"]:
             btn = QPushButton(name)
             rcDict[name] = {}
             rcDict[name]["button"] = btn
@@ -696,10 +789,10 @@ class RobotGUI(QMainWindow):
         # Initialize Calibration Parameters
         calType = ""
         axesToIndex = {
-            "Q1": False,
-            "Q2": False,
-            "Q3": False,
-            "Q4": False
+            "Q1": {"enabled": False, "value": 0},
+            "Q2": {"enabled": False, "value": 0},
+            "Q3": {"enabled": False, "value": 0},
+            "Q4": {"enabled": False, "value": 0},
         }
         
         # Check which
@@ -715,7 +808,7 @@ class RobotGUI(QMainWindow):
         for axis,axisData in self.buttonDict["Calibration Settings"]["AXIS"].items():
             button = axisData["button"]
             if button.isChecked():
-                axesToIndex[axis] = True
+                axesToIndex[axis]["enabled"] = True
         
         # Construct Goal
         goal = {"Mode":calType,
@@ -724,7 +817,34 @@ class RobotGUI(QMainWindow):
         # Send Goal Request
         print(f"Client Request: {goal}")
 
-        self.actionClients["calCmdClient"].sendGoalRequest(goal)  
+        self.actionClients["calCmdClient"].sendGoalRequest(goal)
+
+    def sendGripObjectGoalRequest(self):
+        sender = self.sender()  # Determine which button was pressed
+
+        # Step 1: Initialize Grip Parameters
+        gripType = ""
+        gripDiameter = None
+
+        # Step 2: Check which grip type is selected (Internal or External)
+        for eeGripTypeKey,eeGripTypeData in self.buttonDict["End Effector Settings"].items():
+            button = eeGripTypeData["button"]
+            if button.isChecked():
+                gripType = eeGripTypeKey
+                break
+        
+        # Step 3: Populate the desired grip diameter
+        gripDiameter = self.textBoxDict["End Effector Control"]["GRIP DIAMETER (mm)"].text()
+
+        # Step 4: Construct Goal
+        goal = {
+            "GRIP TYPE": gripType,
+            "GRIP DIAMETER": gripDiameter
+            }
+        
+        # Step 5: Send Goal Request
+        print(f"Client Request: {goal}")
+        self.actionClients["gripCmdClient"].sendGoalRequest(goal)
 
 # ==================================================================  
 #     METHODS TO TEXT FIELD BEHAVIORS

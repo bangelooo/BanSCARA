@@ -437,6 +437,91 @@ def createBanSCARA():
 
     return scaraRobot
 
+# ============ ROBOT END EFFECTOR ===============
+
+class GripType(Enum):
+    INTERNAL = 1
+    EXTERNAL = 2
+
+class RobotEE():
+    def __init__(self,module,numTeethSG,numTeethPG,fingerLength,startingOffsetOfPG):
+        # CONSTANT PARAMETERS
+        self.MODULE = module
+        self.N_TEETH_SUN_GEAR = numTeethSG
+        self.N_TEETH_PLANET_GEAR = numTeethPG
+        self.FINGER_LENGTH = fingerLength
+        self.GEAR_RATIO = self.N_TEETH_PLANET_GEAR/self.N_TEETH_SUN_GEAR
+        self.SUN_GEAR_PITCH_RADIUS = self.MODULE * self.N_TEETH_SUN_GEAR / 2
+        self.PLANET_GEAR_PITCH_RADIUS = self.MODULE * self.N_TEETH_PLANET_GEAR /2
+
+        self.STARTING_OFFSET_OF_PG = startingOffsetOfPG
+        self.MIN_GRIP_DIAMETER = self.findGripDiameterLimits(0)
+        self.MAX_GRIP_DIAMETER = self.findGripDiameterLimits(self.determineSunGearAngle(180))
+
+        # VARIABLES
+        self.solenoidEngaged = False
+        self.sunGearAngle = 0.0
+       
+        self.currentGripDiameter = self.findGripDiameter(self.sunGearAngle)
+        self.gripType = GripType.INTERNAL
+
+    def determineSunGearAngle(self,thetaPG):
+        return thetaPG / self.GEAR_RATIO
+    
+    def determineSunGearTravel(self,startingGripDiameter,endingGripDiameter):
+        thetaStartSG = self.findDriveAngle(startingGripDiameter)
+        thetaEndSG = self.findDriveAngle(endingGripDiameter)
+        return thetaEndSG - thetaStartSG
+
+    def findGripDiameterLimits(self,thetaSGdeg):
+        # Does not account for planet gear offset
+        r1 = self.SUN_GEAR_PITCH_RADIUS
+        r2 = self.PLANET_GEAR_PITCH_RADIUS
+        fl = self.FINGER_LENGTH
+        thetaPGdeg = - self.GEAR_RATIO * thetaSGdeg
+        thetaPGrad = np.deg2rad(thetaPGdeg)
+        rSquared = (r1 + r2)**2 + fl**2 - 2 * (r1 + r2) * fl * np.cos(thetaPGrad)
+        diameter = np.sqrt(rSquared) * 2
+        return diameter
+    
+    def findGripDiameter(self,thetaSGdeg):
+        # Does account for planet gear offset
+        r1 = self.SUN_GEAR_PITCH_RADIUS
+        r2 = self.PLANET_GEAR_PITCH_RADIUS
+        fl = self.FINGER_LENGTH
+        thetaPGdeg = - self.GEAR_RATIO * thetaSGdeg + self.STARTING_OFFSET_OF_PG
+        thetaPGrad = np.deg2rad(thetaPGdeg)
+        rSquared = (r1 + r2)**2 + fl**2 - 2 * (r1 + r2) * fl * np.cos(thetaPGrad)
+        diameter = np.sqrt(rSquared) * 2
+        return diameter
+
+    def findDriveAngle(self,gripDiameter):
+        if gripDiameter > self.MAX_GRIP_DIAMETER or gripDiameter < self.MIN_GRIP_DIAMETER:
+            print(f"Grip Diameter Out of Range. Diamter must be between {self.MIN_GRIP_DIAMETER} mm and {self.MAX_GRIP_DIAMETER}mm. ")
+            return
+        else:
+            r1 = self.SUN_GEAR_PITCH_RADIUS
+            r2 = self.PLANET_GEAR_PITCH_RADIUS
+            fl = self.FINGER_LENGTH
+
+            thetaPGrad = np.arccos(((r1 + r2)**2 + fl**2 - 0.25 * gripDiameter**2)/(2 * (r1 + r2) * fl))
+
+            thetaPGdeg = np.rad2deg(thetaPGrad)
+            thetaSGdeg = thetaPGdeg / self.GEAR_RATIO -self.STARTING_OFFSET_OF_PG
+
+            return thetaSGdeg
+    
+    def activateSolenoid(self):
+        self.solenoidEngaged = True
+        print("Solenoid is engaged")
+
+    def deactivateSolenoid(self):
+        self.solenoidEngaged = False
+        print("Solenoid is disengaged.")
+
+    def displayGripDiameterLimits(self):
+        print(f"The grip diameters for the end effector are between {self.MIN_GRIP_DIAMETER} mm and {self.MAX_GRIP_DIAMETER} mm. ")
+
 # ============= ROBOT ARM  CONTROLLER=======================
 class MachineState(Enum):
     # Modelled after PackML 
@@ -473,6 +558,7 @@ class RobotArmController():
     # Contructor
     def __init__(self,robotObject,topicsList,serviceList,actionsList):        # Instantiate robot arm
         self.robot = robotObject   
+        self.endEffector = RobotEE(1.5,20,20,25,11.723)
 
         # ======================================
         #   Publishers and Subscribers
@@ -505,7 +591,7 @@ class RobotArmController():
         # ======================================
         #   Action Servers
         # ======================================
-        actionServers = ["jCmd","cCmd","calCmd"]
+        actionServers = ["jCmd","cCmd","calCmd","gripCmd"]
 
         # Create dictionary of Actions and Action Servers
         self.actions = {}
@@ -524,6 +610,7 @@ class RobotArmController():
             self.actionServers["jCmdServer"].assignGHF(self.jSpaceGRH)
             self.actionServers["cCmdServer"].assignGHF(self.cSpaceGRH)
             self.actionServers["calCmdServer"].assignGHF(self.indexGRH)
+            self.actionServers["gripCmdServer"].assignGHF(self.gripObjGRH)
         except:
             print("There is an action that does not exist")
     
@@ -542,6 +629,10 @@ class RobotArmController():
         self.poseState = self.robot.pose
         self.desiredElbOri = "elbowDown"
         self.indexingMode = IndexMode.DIRECT
+
+        self.gripDiameter = self.endEffector.currentGripDiameter
+        self.gripperEngaged = False
+        self.gripType = None
 
         # Attributes for trajectory
         self.trajTargets = {"J-Space": {}, "C-Space": {}}
@@ -705,6 +796,49 @@ class RobotArmController():
 
         finishGoal(resultRequstCB)
 
+    def gripObjGRH(self,goal,finishGoal,feedbackPub,resultRequestCB):
+        # Step 1: Extract data from goal message
+        gripType = goal["GRIP TYPE"]
+        desiredGripDiameter = goal["GRIP DIAMETER"]
+
+
+        # Step 2: Capture current Grip Diameter and Q4 Angle
+        q4 = self.jointState[3]
+        currentGripDiameter = self.gripDiameter
+        print(f"Current Q4 Angle: {q4} | Current Grip Diameter{currentGripDiameter}")
+
+        # Step 3: Calculate relative distance the end effector must travel
+        q4RelativeTravel = self.endEffector.determineSunGearTravel(currentGripDiameter,float(desiredGripDiameter))
+        
+        if self.operatingMode == OperatingMode.OPERATION:
+            if gripType == "INTERNAL":
+                # Send Command to Activate Solenoid
+                self.sendCommand("solenoidon")
+                time.sleep(1)
+
+                # Send command to desired grip diameter
+                self.sendCommand(f"REL,Q4:{round(q4RelativeTravel)}")
+                time.sleep(10)
+
+                # Send Command to De-activate Solenoiid
+                self.sendCommand("solenoidoff")
+                time.sleep(1)
+
+                # Send command to help release solenoid pins from planet carrier slots.
+                self.sendCommand("REL,Q4:-4")
+                time.sleep(2)
+
+                self.sendCommand("REL,Q4:4")
+                time.sleep(2)
+
+                # Reset Q4's Arduino Position
+                self.gripDiameter = round(float(desiredGripDiameter))
+                self.sendCommand(f"HOME,DIRECT,Q4:{str(q4)}")
+            
+        # Step 6: Return result after goal execution has finished
+        finishGoal(resultRequestCB)
+
+
     def parseMoveCommand(self,goalMsg):
         # Extract Move Type
         moveType = goalMsg["moveType"]
@@ -759,7 +893,8 @@ class RobotArmController():
         
         # Step 2: Creat a string of the axes to index using a generator expression and the str.join() method
         axesToIndexStr = ",".join(
-            axis for axis, enabled in axesToIndexDict.items() if enabled
+            f"{axis}:{data['value']}"
+            for axis,data in axesToIndexDict.items() if data["enabled"]
         )
 
         # Step 3: Define Lookup Table
