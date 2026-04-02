@@ -132,13 +132,13 @@ class RobotArm():
     def _getPoseDict(self):
         """
         Returns a dictionary of the robot pose.
-        Keys: "FK" , "POSITION", "ANGLE"
+        Keys: "FK" , "POSITION", "ANGLE (deg)"
         """
         q = self.jointPosition
         FK , _ = self.forwardKin(q)
         r11 = FK[0][0]
         r21 = FK[1][0]
-        yaw = np.arctan2(r21,r11)
+        yaw = np.arctan2(r21,r11)      # Radians 
         poseDict = {
             "FK": FK,
             "POSITION": [FK[0][3],FK[1][3],FK[2][3]],
@@ -172,13 +172,13 @@ class RobotArm():
     # ============================================================
     def scaraIK(self,x,y,z,phi,elbowOrient):
         '''
-        Returns a tuple of the joint angles required to achieve the desired robot pose.
+        Returns a tuple of the joint angles (in degrees) required to achieve the desired robot pose.
         
-        :param x: x-coordinate
-        :param y: y-coorindate
-        :param z: z-coordinate
-        :param phi: yaw-angle about the base frame
-        :param elbowOrient: Elbow orientation
+        :param x: x-coordinate (mm)
+        :param y: y-coorindate (mm)
+        :param z: z-coordinate (mm)
+        :param phi: yaw-angle about the base frame (radians)
+        :param elbowOrient: Elbow orientation (elbowUp / elbowDown)
         '''
         # Extract link information of robot
         L = ["null"]
@@ -740,28 +740,33 @@ class RobotArmController():
         moveType = goal["moveType"]
         mode = goal["mode"]
         axis = goal["axis"]
-        jogDistance = goal["jogDistance"]
-        desiredPose = goal["pose"]
+        jogDistance = goal["jogDistance"]   # Units: X,Y,Z = mm , Phi = degrees
+        desiredPose = goal["pose"]          # Units: X,Y,Z = mm , Phi = degrees
         
 
         # Step 2: Obtain current robot pose
-        currentXYZ = self.poseState["POSITION"]
-        currentPHI = self.poseState["ANGLE"]
-        currentPose = [currentXYZ,currentPHI]
+        currentXYZ = self.poseState["POSITION"]     # Units: mm
+        currentPHI = self.poseState["ANGLE"]        # Units: radians
+        currentPose = [currentXYZ,currentPHI]       # [mm,mm,mm,radians]
         currentPose = np.concatenate([np.atleast_1d(item) for item in currentPose]).tolist()
 
 
         axisToIndex = {"X":0,"Y":1,"Z":2,"φ":3}
 
         if mode == "REL":
-            currentPose[axisToIndex[axis]] += jogDistance
+            if axis == "φ":
+                currentPose[axisToIndex[axis]] += np.deg2rad(jogDistance)
+                currentPose[axisToIndex[axis]] = np.rad2deg(currentPose[axisToIndex[axis]])
+            else:
+                currentPose[axisToIndex[axis]] += jogDistance
             desiredPose = currentPose
                 
         # Step 3: Extract cartesian coordinates for robot IK
         x = desiredPose[0]
         y = desiredPose[1]
         z = desiredPose[2]
-        phi = desiredPose[3]
+        
+        phi = np.deg2rad(desiredPose[3])
 
         # Step 4: Perfrom inverse kinematics
         q1,q2,q3,q4 = self.robot.scaraIK(x,y,z,phi,self.desiredElbOri)
@@ -802,11 +807,9 @@ class RobotArmController():
         gripType = goal["GRIP TYPE"]
         desiredGripDiameter = goal["GRIP DIAMETER"]
 
-
         # Step 2: Capture current Grip Diameter and Q4 Angle
-        q4 = self.jointState[3]
+        q4 = np.rad2deg(self.jointState[3])
         currentGripDiameter = self.gripDiameter
-        print(f"Current Q4 Angle: {q4} | Current Grip Diameter{currentGripDiameter}")
 
         # Step 3: Calculate relative distance the end effector must travel
         q4RelativeTravel = self.endEffector.determineSunGearTravel(currentGripDiameter,float(desiredGripDiameter))
@@ -819,7 +822,7 @@ class RobotArmController():
 
                 # Send command to desired grip diameter
                 self.sendCommand(f"REL,Q4:{round(q4RelativeTravel)}")
-                time.sleep(10)
+                time.sleep(8)
 
                 # Send Command to De-activate Solenoiid
                 self.sendCommand("solenoidoff")
@@ -830,12 +833,16 @@ class RobotArmController():
                 time.sleep(2)
 
                 self.sendCommand("REL,Q4:2")
-                time.sleep(2)
+                time.sleep(3)
 
                 # Reset Q4's Arduino Position
                 self.gripDiameter = round(float(desiredGripDiameter))
-                self.sendCommand(f"HOME,DIRECT,Q4:{str(q4)}")
-            
+                self.sendCommand(f"HOME,DIRECT,Q4:{str(q4)}") # Indexing in degrees
+                time.sleep(2)
+
+            elif gripType == "EXTERNAL":
+                pass
+
         # Step 6: Return result after goal execution has finished
         finishGoal(resultRequestCB)
 
@@ -844,12 +851,12 @@ class RobotArmController():
         gripType = goal["GRIP TYPE"]
         
         if gripType == "INTERNAL":
-            desiredGripDiameter = self.endEffector.MIN_GRIP_DIAMETER
+            desiredGripDiameter = self.endEffector.MIN_GRIP_DIAMETER + 1
         elif gripType == "EXTERNAL":
             desiredGripDiameter = self.endEffector.MAX_GRIP_DIAMETER
 
         # Step 2: Capture current Grip Diameter and Q4 Angle
-        q4 = self.jointState[3]
+        q4 = np.rad2deg(self.jointState[3])
         currentGripDiameter = self.gripDiameter
         print(f"Current Q4 Angle: {q4} | Current Grip Diameter{currentGripDiameter}")
 
@@ -883,7 +890,6 @@ class RobotArmController():
             
         # Step 6: Return result after goal execution has finished
         finishGoal(resultRequestCB)
-
 
     def parseMoveCommand(self,goalMsg):
         # Extract Move Type
@@ -936,8 +942,11 @@ class RobotArmController():
         # Step 1: Extract data from goal message
         desiredMode = goal["Mode"]
         axesToIndexDict = goal["Axes to Index"]
+
+        # Get Current Joint Positions
+        currentJointPos = self.jointState
         
-        # Step 2: Creat a string of the axes to index using a generator expression and the str.join() method
+        # Step 2: Create a string of the axes to index using a generator expression and the str.join() method
         axesToIndexStr = ",".join(
             f"{axis}:{data['value']}"
             for axis,data in axesToIndexDict.items() if data["enabled"]
@@ -958,7 +967,13 @@ class RobotArmController():
         else:
             print(f"Simulation Arduino Command: {arduinoCmd}")
         
-        # Step 6: Return result after goal execution has finished
+        # Step 6: Update Controller States 
+        for index,(_,value) in enumerate(axesToIndexDict.items()):
+            if value["enabled"]:
+                currentJointPos[index] = 0 
+        self.updateJointState(currentJointPos)
+        
+        # Step 7: Return result after goal execution has finished
         finishGoal(resultRequestCB)
 
     # ====================================================
