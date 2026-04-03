@@ -24,8 +24,9 @@ robotArm = createBanSCARA()
 # Create shared topics
 jStateTopic = Topic("jState")
 cStateTopic = Topic("cState")
+calStateTopic = Topic("calState")
 
-topicsList = [jStateTopic,cStateTopic]
+topicsList = [jStateTopic,cStateTopic,calStateTopic]
 
 # Create shared Actions
 jCmdAction = Action("jCmd")
@@ -47,3 +48,6 @@ window = RobotGUI(robotArm,robotControl,topicsList,serviceList,actionsList)
 window.show()
 
 app.exec()
+
+
+# print(window.statusDict)

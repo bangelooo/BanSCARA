@@ -172,7 +172,7 @@ class RobotGUI(QMainWindow):
         #   Publishers and Subscribers
         # ======================================
         # Set publishers and subscribers for robot controller
-        subs = ["jState","cState"]
+        subs = ["jState","cState","calState"]
         pubs = ["jCmd","cCmd"]
 
        # Create topics dictionary
@@ -233,6 +233,7 @@ class RobotGUI(QMainWindow):
         # Dictionaries for buttons
         self.buttonDict = {}
         self.textBoxDict = {}
+        self.statusDict = {}
 
         # Create tab structure for main window
         tabs = QTabWidget()
@@ -318,7 +319,7 @@ class RobotGUI(QMainWindow):
         rsLayout = QVBoxLayout(container)
 
         # Create Widget Groups
-        cSettingGroup,cSettingDict = self.createCalibrationSettingGroup()
+        cSettingGroup,cSettingDict,calStatusDictEntry = self.createCalibrationSettingGroup()
         eeSettingGroup,eeSettingDict = self.createEESettingGroup()
         cStateGroup,cStateDict = self.createcStateGroup()
         jStateGroup,jStateDict = self.createjStateGroup()
@@ -328,6 +329,8 @@ class RobotGUI(QMainWindow):
         self.buttonDict["End Effector Settings"] = eeSettingDict
         self.textBoxDict["Cartesian Control Settings"] = cStateDict
         self.textBoxDict["Joint Space Control Settings"] = jStateDict
+
+        self.statusDict["Calibration Status"] = calStatusDictEntry
         
 
         # Add lineEdit to desired dictionary
@@ -425,10 +428,15 @@ class RobotGUI(QMainWindow):
         calStatusRow = QHBoxLayout()
         calStatusLbl = QLabel("STATUS")
         calStatusRow.addWidget(calStatusLbl)
+        
+        # Create dictionary enter
+        calStatusDictEntry = {}
 
         for name in ["Q1", "Q2", "Q3", "Q4"]:
             statusLEDGroup,statusLED = createStatusLEDGroup(name)
             calStatusRow.addLayout(statusLEDGroup)
+            calStatusDictEntry[name] = statusLED
+
 
         layout.addLayout(calStatusRow)
         layout.addLayout(calAxisRow)
@@ -436,7 +444,7 @@ class RobotGUI(QMainWindow):
 
         container.setLayout(layout)
 
-        return container,csDict
+        return container,csDict,calStatusDictEntry
 
     def createRobotControlGroup(self):
         container = QGroupBox("ROBOT CONTROL")
@@ -846,7 +854,6 @@ class RobotGUI(QMainWindow):
         # Step 5: Send Goal Request
         print(f"Client Request: {goal}")
         self.actionClients["gripCmdClient"].sendGoalRequest(goal)
-
     
     def sendReleaseObjectGoalRequest(self):
         sender = self.sender()  # Determine which button was pressed
@@ -877,6 +884,7 @@ class RobotGUI(QMainWindow):
         # Read jState and cState subscribers
         jState = self.subscribers["jStateSub"].msg
         cState = self.subscribers["cStateSub"].msg
+        calState = self.subscribers["calStateSub"].msg
         
         # Update joint state fields in GUI
         for i, (_,subDict) in enumerate(self.textBoxDict["Joint Space Control Settings"].items()):
@@ -893,6 +901,13 @@ class RobotGUI(QMainWindow):
                 angle = str(angle)
                 subDict["Current Pose"].setText(angle)
         
+        # Update the calibration state fields in the GUI
+        for i, (key,value) in enumerate(self.statusDict["Calibration Status"].items()):
+            if calState[i]:
+                value.setState(True)
+            else:
+                value.setState(False)
+
     def updateRobotState(self):
         # Update Current Cartesian Cartesian Position 
         pose = self.robot.pose["POSITION"]

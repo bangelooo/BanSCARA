@@ -564,7 +564,7 @@ class RobotArmController():
         #   Publishers and Subscribers
         # ======================================
         # Set publishers and subscribers for robot controller
-        pubs = ["jState","cState"]
+        pubs = ["jState","cState","calState"]
         subs = []
 
         # Add topics from topicsList
@@ -645,9 +645,6 @@ class RobotArmController():
         self.cmdID = 0
 
 
-        # Robot Routine
-
-
     # ======================================
     #   Methods for Serial Communication
     # ======================================
@@ -673,6 +670,7 @@ class RobotArmController():
                 return msg
             except serial.SerialException as e:
                 print(f"Port already open: {e}")
+    
     def disconnectSerial(self):
         if "serialObj" not in self.__dict__:
             msg = "Not connected. Cannot disconnect"
@@ -970,7 +968,8 @@ class RobotArmController():
         # Step 6: Update Controller States 
         for index,(_,value) in enumerate(axesToIndexDict.items()):
             if value["enabled"]:
-                currentJointPos[index] = 0 
+                currentJointPos[index] = 0
+                self.calibrationState[index] = True
         self.updateJointState(currentJointPos)
         
         # Step 7: Return result after goal execution has finished
@@ -1038,7 +1037,6 @@ class RobotArmController():
             currPosFloatList = [float(x) for x in currentJointPosition] # Convert numpy float to float
         self.updateJointState(currPosFloatList)
          
-
     # ====================================================
     #   Methods for updating robot joint position and pose
     # ====================================================
@@ -1047,9 +1045,11 @@ class RobotArmController():
         # Retrieve latest information about joint positions and pose from controller
         jState = self.jointState
         cState = self.poseState
+        calState = self.calibrationState
         # Publish state to topic
         self.publishers["jStatePub"].publishMsg(jState)
         self.publishers["cStatePub"].publishMsg(cState)
+        self.publishers["calStatePub"].publishMsg(calState)
     
     def updateJointState(self,q):
         # Update information in robotArm object
