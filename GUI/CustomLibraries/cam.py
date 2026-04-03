@@ -12,7 +12,9 @@ class cycloidalMotionCAM:
         self._displacementMap()
 
     def _camDisplacement(self,angle):
-
+        """
+        Input: Angel (Degrees)
+        """
         # RISE
         if (angle >= 0) and (angle <= self.betaRise):
             theta = np.deg2rad(angle)
@@ -83,6 +85,14 @@ class cycloidalMotionCAM:
             desiredAngle = np.interp(yDesired,rmY,rmAngle)
             
             return desiredAngle
+    
+    def findPosition(self,angle):
+        """
+        Determine the position (mm) based on the provided angle (degrees)
+        """
+        position,phase = self._camDisplacement(angle)
+
+        return position
 
 
 
