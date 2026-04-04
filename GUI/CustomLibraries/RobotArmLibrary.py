@@ -783,7 +783,9 @@ class RobotArmController():
 
         arduinoCmd = self.parseMoveCommand(goal)
 
-        desiredPositions = [np.deg2rad(x) for x in desiredPositions] # Covert joint angles from degrees to radians
+        for i in range(len(desiredPositions)):
+            if self.robot.links[i].jointType == "revolute":
+                desiredPositions[i] = np.deg2rad(desiredPositions[i])
 
         # Step 5: Create Joint Trajectories
         self.createTrajectories(desiredPositions,"J")
@@ -920,7 +922,13 @@ class RobotArmController():
         # Cartesian Space Goal Pasrsing
         elif moveType == "Cartesian Space":
             mode = goalMsg["mode"]
-            jointPositions = goalMsg["jointPositions"]
+            jointPositions = goalMsg["jointPositions"].copy()
+
+            for i in range(len(jointPositions)):
+                if self.robot.links[i].jointType == "prismatic" or self.robot.links[i].driveMechanism != "DIRECT":
+                    position = jointPositions[i]
+                    jointPositions[i] = self.robot.links[i].driveMechObj.findAngle(position)
+
             arduinoString = f"{mode},Q1:{jointPositions[0]},Q2:{jointPositions[1]},Q3:{jointPositions[2]},Q4:{jointPositions[3]}"
         return arduinoString
 
