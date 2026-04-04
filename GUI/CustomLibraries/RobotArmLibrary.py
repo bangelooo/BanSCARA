@@ -190,7 +190,7 @@ class RobotArm():
         # CALCULATE D1
         d1 = z - L[1] - d[4]
 
-        d1 = self.links[0].driveMechObj.findAngle(d1)
+        #d1 = self.links[0].driveMechObj.findAngle(d1)
         
         # Calculate P3X and P3Y
         p3x = x - L[4] * np.cos(phi)
@@ -708,8 +708,12 @@ class RobotArmController():
         arduinoCmd = self.parseMoveCommand(goal)
 
         # Step 3: Convert desired positions and travel distance to radians
-        jogDistance = np.deg2rad(jogDistance)
-        desiredPositions = [np.deg2rad(x) for x in desiredPositions] # Covert joint angles from degrees to radians
+        if joint != "Q1":
+            jogDistance = np.deg2rad(jogDistance)
+
+        for i in range(len(desiredPositions)):
+            if self.robot.links[i].jointType == "revolute":
+                desiredPositions[i] = np.deg2rad(desiredPositions[i])
         
         if mode == "REL":
             index = int(joint[1]) - 1 
@@ -748,7 +752,6 @@ class RobotArmController():
         currentPose = [currentXYZ,currentPHI]       # [mm,mm,mm,radians]
         currentPose = np.concatenate([np.atleast_1d(item) for item in currentPose]).tolist()
 
-
         axisToIndex = {"X":0,"Y":1,"Z":2,"φ":3}
 
         if mode == "REL":
@@ -767,10 +770,9 @@ class RobotArmController():
         phi = np.deg2rad(desiredPose[3])
 
         # Step 4: Perfrom inverse kinematics
-        q1,q2,q3,q4 = self.robot.scaraIK(x,y,z,phi,self.desiredElbOri)
+        q1,q2,q3,q4 = self.robot.scaraIK(x,y,z,phi,self.desiredElbOri) # [mm,deg,deg,deg]
 
         desiredPositions = [q1,q2,q3,q4]
-        print(desiredPositions)
 
         # Re-construct goal for parsing
         goal = {
@@ -898,7 +900,17 @@ class RobotArmController():
             mode = goalMsg["mode"]
             joint = goalMsg["joint"]
             jogDistance = goalMsg["jogDistance"]
-            jointPositions = goalMsg["jointPositions"]
+            jointPositions = goalMsg["jointPositions"].copy()
+            currentPosition = self.jointState.copy()
+
+            for i in range(len(jointPositions)):
+                if self.robot.links[i].jointType == "prismatic" or self.robot.links[i].driveMechanism != "DIRECT":
+                    position = jointPositions[i]
+                    jointPositions[i] = self.robot.links[i].driveMechObj.findAngle(position)
+
+            if joint == "Q1":
+                endPosition = currentPosition[0] + jogDistance
+                jogDistance = self.robot.links[0].driveMechObj.findAngleRelative(currentPosition[0],endPosition)
 
             if mode == "ABS":
                 arduinoString = f"{mode},Q1:{jointPositions[0]},Q2:{jointPositions[1]},Q3:{jointPositions[2]},Q4:{jointPositions[3]}"

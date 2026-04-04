@@ -888,7 +888,10 @@ class RobotGUI(QMainWindow):
         
         # Update joint state fields in GUI
         for i, (_,subDict) in enumerate(self.textBoxDict["Joint Space Control Settings"].items()):
-            state = round(np.rad2deg(jState[i]),2)
+            if i == 0: # Conversion not needed for joint 1 (prismatic)
+                state = round(jState[i],2)
+            else:
+                state = round(np.rad2deg(jState[i]),2)
             subDict["Current Position"].setText(str(state))
         
         # Update pose state fields in GUI

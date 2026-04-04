@@ -88,7 +88,7 @@ class cycloidalMotionCAM:
             return desiredAngle
     
     def findAngleRelative(self,yStart,yEnd):
-        if (yEnd < 0 or yStart < 0) or (yEnd > self.h or yStart > self.h):
+        if (yEnd < 0) or (yEnd > self.h):
             return print(f"Desired value {yEnd} is out of range")
         else:
             # Extract angle and dispalcement info from rise map
