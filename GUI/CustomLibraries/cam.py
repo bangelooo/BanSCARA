@@ -14,6 +14,7 @@ class cycloidalMotionCAM:
     def _camDisplacement(self,angle):
         """
         Input: Angel (Degrees)
+        Output: Absolute Position
         """
         # RISE
         if (angle >= 0) and (angle <= self.betaRise):
@@ -86,6 +87,20 @@ class cycloidalMotionCAM:
             
             return desiredAngle
     
+    def findAngleRelative(self,yStart,yEnd):
+        if (yEnd < 0 or yStart < 0) or (yEnd > self.h or yStart > self.h):
+            return print(f"Desired value {yEnd} is out of range")
+        else:
+            # Extract angle and dispalcement info from rise map
+            rmAngle = self.riseMap[0]
+            rmY = self.riseMap[1]
+
+            #Interpolation for startAngle
+            startAngle = np.interp(yStart,rmY,rmAngle)
+            endAngle = np.interp(yEnd,rmY,rmAngle)
+
+            return endAngle - startAngle
+    
     def findPosition(self,angle):
         """
         Determine the position (mm) based on the provided angle (degrees)
@@ -93,6 +108,7 @@ class cycloidalMotionCAM:
         position,phase = self._camDisplacement(angle)
 
         return position
+    
 
 
 
