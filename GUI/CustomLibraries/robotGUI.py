@@ -256,12 +256,13 @@ class RobotGUI(QMainWindow):
         self.buttonDict["String Command"]["output"]["button"].clicked.connect(self.clearLog)
 
         self.buttonDict["Robot Control"]["OPERATION MODE TOGGLE"]["button"].toggled.connect(self.controller.toggleOpMode)
-        self.buttonDict["Robot Control"]["START ROUTINE"]["button"].clicked.connect(self.controller.practiceRoutine)
+        self.buttonDict["Robot Control"]["START ROUTINE"]["button"].clicked.connect(self.controller.routineTest)
         self.buttonDict["Robot Control"]["MOTOR ON TOGGLE"]["button"].toggled.connect(self.controller.toggleMotorsOn)
         
         self.buttonDict["Robot Control"]["CALIBRATE"]["button"].clicked.connect(self.sendIndexGoalRequest)
         self.buttonDict["Robot Control"]["GRIP OBJECT"]["button"].clicked.connect(self.sendGripObjectGoalRequest)
         self.buttonDict["Robot Control"]["RELEASE OBJECT"]["button"].clicked.connect(self.sendReleaseObjectGoalRequest)
+        
     # ======================================
     #   Multi-Threading
     # ======================================
@@ -727,8 +728,8 @@ class RobotGUI(QMainWindow):
             "jogDistance": jogDistance * direction,
             "jointPositions": jointPositions,
         }
-        print(f"Type moveType:{moveType} | mode: {mode} | joint: {joint} | Jog Distance: {jogDistance * direction} | jointPositions: {jointPositions}")
-        print(f"Type moveType:{type(moveType)} | mode: {type(mode)} | joint: {type(joint)} | Jog Distance: {type(jogDistance * direction)} | jointPositions: {type(jointPositions[0])}")
+        #print(f"Type moveType:{moveType} | mode: {mode} | joint: {joint} | Jog Distance: {jogDistance * direction} | jointPositions: {jointPositions}")
+        #print(f"Type moveType:{type(moveType)} | mode: {type(mode)} | joint: {type(joint)} | Jog Distance: {type(jogDistance * direction)} | jointPositions: {type(jointPositions[0])}")
 
         self.actionClients["jCmdClient"].sendGoalRequest(goal)   
     
@@ -778,7 +779,7 @@ class RobotGUI(QMainWindow):
             "jogDistance": jogDistance * direction,
             "pose": pose
         }
-        print(goal)
+        #print(goal)
 
         self.actionClients["cCmdClient"].sendGoalRequest(goal)   
 

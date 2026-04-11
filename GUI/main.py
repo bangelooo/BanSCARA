@@ -48,6 +48,3 @@ window = RobotGUI(robotArm,robotControl,topicsList,serviceList,actionsList)
 window.show()
 
 app.exec()
-
-
-# print(window.statusDict)

@@ -1,6 +1,7 @@
 #include "motorBasic.h"
 
 // Define I/O
+
 #define stepPin   3     // STEP pin for motor 1
 #define dirPin    2     // DIRECTION pin for motor 1
 
@@ -27,7 +28,6 @@ AccelStepper mtr3(AccelStepper::DRIVER,stepPin3,dirPin3);
 AccelStepper mtr4(AccelStepper::DRIVER,stepPin4,dirPin4);
 AccelStepper *mtrs[]={&mtr,&mtr2,&mtr3,&mtr4};
  
-
 // Create instance of axis parameters
 microStepMode stepMode = microStepMode::half;
 axisPar mtrPar1(1,19,stepMode);
@@ -45,25 +45,42 @@ motorBasic mtrBasic4;
 
 motorBasic *mtrBasics[] = {&mtrBasic1,&mtrBasic2,&mtrBasic3,&mtrBasic4};
 
+// Create Enum for Machine State
+enum class MachineState
+{
+  IDLE = 1,
+  BUSY = 2,
+  ERROR = 3,
+  RESETTING = 4,
+  ABORTING = 5,
+};
 
 // Global variables
+  // Variables for command handling
 String robotCmd = "";
 bool stringComplete{0};
 bool stringError{0};
 bool cmdRequest{0};
+
+  // Variables for robot state
 const int numJoints = 4;
-bool motorEnable{0};
+
 bool indexMotor[numJoints] = {0,0,0,0};
 
 int commandID{0};
 
-// Robot variables
+  // Robot variables for tracking movement
 long qPos[numJoints]  = {0,0,0,0};
 long qdot[numJoints]  = {0,0,0,0};
 long qDist[numJoints] = {0,0,0,0};
 long qHome[numJoints] = {0,0,0,0};
-moveMode mode = moveMode::moveIdle;
 
+  // Robot variables for operating mode and machine state
+moveMode mode = moveMode::moveIdle;
+MachineState state = MachineState::IDLE;
+
+  // Robot variables for I/O
+bool motorEnable{0};
 bool solenoidTrigger = 0;
 
 
@@ -109,7 +126,7 @@ void setup()
       break;
   }
 
-  // Change postive direction
+  // Change positive direction
   mtr2.setPinsInverted(true,false,false);
   mtr3.setPinsInverted(true,false,false);
 
@@ -118,14 +135,30 @@ void setup()
   {
     mo->setMaxSpeed(2500);
     mo->setAcceleration(2500);
-
   }
 
   // Set motor enable pin
   pinMode(mtrEnablePin,OUTPUT);
   digitalWrite(mtrEnablePin,HIGH);
 
+  //displayModeSettings();
+
+  /*
+  Serial.println("Robot Ready...");
+  Serial.print("Machine State: ");
+  Serial.println((int)state);
+  Serial.print("Operating Mode: ");
+  Serial.println((int)mode);
+  */
   
+}
+
+void resetStringCmd()
+{
+  robotCmd = "";
+  stringComplete = false;
+  cmdRequest = false;
+  stringError = false;
 }
 
 void loop() 
@@ -133,8 +166,6 @@ void loop()
   // 1. Prompt user for a robot command
   if(!cmdRequest)
   {
-    Serial.print("READY. Current mode.");
-    Serial.println((int)mode);
     cmdRequest = true;
   }
   // 2. Check if new serial input;
@@ -142,20 +173,42 @@ void loop()
   
   if(stringComplete)
   {
-    startTime = micros();
-    Serial.print("Command issued: ");
-    Serial.println(robotCmd);
+    if (robotCmd.length() == 0)
+    {
+      resetStringCmd();
+      Serial.println("NACK");  // or "EMPTY"
+      return;
+    }
+
+    if(state == MachineState::IDLE)
+    {
+      Serial.println("ACK");
+      state = MachineState::BUSY;
+    }
+    else if(robotCmd == "STOP")
+    {
+      // Allow command to be parsed.
+    }
+    else
+    {
+      resetStringCmd();
+      Serial.println("NACK");
+      return;
+    }
+  
+    //Serial.print("Command issued: ");
+    //Serial.println(robotCmd);
+
     // 3. Parse Robot Command and set parameters
     parseRbtCmd(robotCmd);
-    if(!stringError)
-    {
-      displayParameter();
-    }
+
+    // if(!stringError)
+    // {
+    //   displayParameter();
+    // }
     // Reset flags
-    robotCmd = "";
-    stringComplete = false;
-    cmdRequest = false;
-    stringError = false;
+    resetStringCmd();
+
     for(auto i =0; i < numJoints; ++i)
     {
       mtrBasics[i]->moveRequested = false;
@@ -178,6 +231,7 @@ void loop()
     digitalWrite(eeEnablePin,HIGH);
   else
     digitalWrite(eeEnablePin,LOW);
+
    //4. Motion Logic
    switch(mode)
    {
@@ -186,7 +240,12 @@ void loop()
         {
           mtrBasics[i]->moveAbsolute(*mtrs[i],*mtrPars[i],qPos[i],5);
         }
-        if(allMotorsIdle()) mode = moveMode::moveIdle;
+        if(allMotorsIdle()) 
+          {
+          mode = moveMode::moveIdle;
+          state = MachineState::IDLE;
+          Serial.println("SUCCESS");
+          }
         break;
       
       case moveMode::moveRelative:
@@ -203,6 +262,8 @@ void loop()
             mtrBasics[i]->moveRequested = false;
           }
           mode = moveMode::moveIdle;
+          state = MachineState::IDLE;
+          Serial.println("SUCCESS");
         }
         break;
       
@@ -242,6 +303,9 @@ void loop()
         {
           indexMotor[i] = 0;
         }
+        mode = moveMode::moveIdle;
+        state = MachineState::IDLE;
+        Serial.println("SUCCESS");
         break;
       default:
         break;
@@ -298,18 +362,30 @@ void parseRbtCmd(String cmd)
     if(token.startsWith("motorson"))
     {
       motorEnable = 1;
+      state = MachineState::IDLE;
+      delay(1000);
+      Serial.println("SUCCESS");
     }
     else if(token.startsWith("motorsoff"))
     {
       motorEnable = 0;
+      state = MachineState::IDLE;
+      delay(1000);
+      Serial.println("SUCCESS");
     }
     else if(token.startsWith("solenoidon"))
     {
       solenoidTrigger = 1;
+      state = MachineState::IDLE;
+      delay(1000);
+      Serial.println("SUCCESS");
     }
     else if(token.startsWith("solenoidoff"))
     {
       solenoidTrigger = 0;
+      state = MachineState::IDLE;
+      delay(1000);
+      Serial.println("SUCCESS");
     }
     else if(token.startsWith("home"))
     {
@@ -317,10 +393,6 @@ void parseRbtCmd(String cmd)
       {
         mode = moveMode::moveHoming;
         modeSet = true;
-        // for(auto i = 0; i < numJoints; ++i)
-        // {
-        //   mtrBasics[i]->isCalibrating = true;
-        // }
       }
     }
     else if(token.startsWith("direct"))
@@ -495,6 +567,25 @@ void resetMoveRel()
 
 void displayParameter()
 {
+  Serial.print("Machine State: ");
+  switch(state)
+  {
+    case MachineState::IDLE:
+      Serial.print("Idle. \t");
+      break;
+    case MachineState::BUSY:
+      Serial.print("Busy. \t");
+      break;
+    case MachineState::ERROR:
+      Serial.print("Error. \t");
+      break;
+    case MachineState::RESETTING:
+      Serial.print("Resetting. \t");
+      break;
+    case MachineState::ABORTING:
+      Serial.print("Aborting. \t");
+      break;
+  }
   Serial.print("Operating Mode: ");
   switch(mode)
   {
@@ -537,5 +628,24 @@ void displayParameter()
       Serial.println("Homing");
       break;
   }
+
+}
+
+void displayModeSettings()
+{
+  Serial.println("===== MACHINE STATES =====");
+  Serial.println("1: IDLE");
+  Serial.println("2: BUSY");
+  Serial.println("3: ERROR");
+  Serial.println("4: RESETTING");
+  Serial.println("5: ABORTING");
+
+  Serial.println("===== OPERATING(MOVE) MODES =====");
+  Serial.println("1: IDLE");
+  Serial.println("2: RELATIVE");
+  Serial.println("3: ABSOLUTE");
+  Serial.println("4: VELOCITY");
+  Serial.println("5: STOPPING");
+  Serial.println("6: HOMING");
 
 }

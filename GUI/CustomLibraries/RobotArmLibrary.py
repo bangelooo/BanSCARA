@@ -683,9 +683,37 @@ class RobotArmController():
     
     def sendCommand(self,cmd):
         self.serialObj.write((cmd + '\n').encode('utf-8'))
-        print("Sent",cmd)
-        while self.serialObj.in_waiting:
-            print(self.serialObj.readline().decode().strip())
+
+        while True:
+            response = self.serialObj.readline().decode().strip()
+            # Ignore blank strings
+            if not response:
+                continue
+            if response == "ACK":
+                result = self.processResultRequest()
+                print(result)
+                return result
+
+    def routineTest(self):
+        while True:
+            self.sendCommand("ABS,Q2:90,Q3:-90")
+            self.sendCommand("ABS,Q2:0,Q3:0")
+            self.sendCommand("ABS,Q2:45,Q3:-45")
+
+    def processResultRequest(self):
+        '''
+        Blocking function. Process responses from Arduino.
+        '''
+        while True:
+            response = self.serialObj.readline().decode().strip()
+            # Ignore blank strings
+            if not response:
+                continue
+
+            if response == "SUCCESS":
+                return "SUCCESS"
+            elif response == "FAILED" or response == "ERROR":
+                return "FAILED"
 
     def initializeRobot(self):
         self.robotState = MachineState.RESETTING
@@ -726,7 +754,7 @@ class RobotArmController():
         # Step 5: Send command to Arduino if in operation mode. 
         if self.operatingMode == OperatingMode.OPERATION:
             self.sendCommand(arduinoCmd)
-        print(arduinoCmd)
+        #print(arduinoCmd)
         
         # Step 5: Simulate Trajectory
         try:
@@ -794,7 +822,7 @@ class RobotArmController():
         # Step 4: Send command to Arduino if in operation mode. 
         if self.operatingMode == OperatingMode.OPERATION:
            self.sendCommand(arduinoCmd)
-        print(arduinoCmd)
+        #print(arduinoCmd)
         
         # Step 5: Simulate Trajectory
         try:

@@ -170,7 +170,7 @@ class TrapezoidalTrajectory():
         self.mtnRulePcn = float(mtnRule[0])/ float(mtnRule[2])
         self.maxAcc = maxAcc
         
-        # Class Constants
+        # Class Constants   
         self.stepSize = 1000
 
         # Determine direction (velocity)
@@ -189,7 +189,7 @@ class TrapezoidalTrajectory():
             velocity = np.zeros(self.stepSize)
             acceleration = np.zeros(self.stepSize)
             self.trajectory = [position,velocity,acceleration]
-            print("Trajectory constant")
+            #print("Trajectory constant")
 
         else:
             self._getTrajParameters()
