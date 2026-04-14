@@ -559,12 +559,13 @@ class RobotArmController():
     def __init__(self,robotObject,topicsList,serviceList,actionsList):        # Instantiate robot arm
         self.robot = robotObject   
         self.endEffector = RobotEE(1.5,20,20,25,11.723)
+        self.routine = self.defaultRoutine()
 
         # ======================================
         #   Publishers and Subscribers
         # ======================================
         # Set publishers and subscribers for robot controller
-        pubs = ["jState","cState","calState"]
+        pubs = ["jState","cState","calState","gripDiameter"]
         subs = []
 
         # Add topics from topicsList
@@ -614,7 +615,17 @@ class RobotArmController():
             self.actionServers["releaseCmdServer"].assignGHF(self.releaseObjGRH)
         except:
             print("There is an action that does not exist")
-    
+
+        # ======================================
+        #   Action Clients
+        # ======================================
+        self.actionClients = {}
+
+        for actionObj in actionsList:
+            if actionObj.name in actionServers:
+                self.actionClients[actionObj.name + "Client"] = ActionClient(actionObj)
+
+        
         # ======================================
         #   Controller Attributes
         # ======================================   
@@ -625,7 +636,7 @@ class RobotArmController():
         self.motorsOn = False
 
         # Controller states
-        self.robotState = MachineState.STOPPED
+        self.robotState = MachineState.IDLE
         self.jointState = self.robot.jointPosition
         self.poseState = self.robot.pose
         self.desiredElbOri = "elbowDown"
@@ -682,17 +693,19 @@ class RobotArmController():
             return msg
     
     def sendCommand(self,cmd):
-        self.serialObj.write((cmd + '\n').encode('utf-8'))
-
-        while True:
-            response = self.serialObj.readline().decode().strip()
-            # Ignore blank strings
-            if not response:
-                continue
-            if response == "ACK":
-                result = self.processResultRequest()
-                print(result)
-                return result
+        if self.operatingMode == OperatingMode.OPERATION:
+            self.serialObj.write((cmd + '\n').encode('utf-8'))
+            while True:
+                response = self.serialObj.readline().decode().strip()
+                # Ignore blank strings
+                if not response:
+                    continue
+                if response == "ACK":
+                    result = self.processResultRequest()
+                    print(result)
+                    return result
+        else:
+            print("SUCCESS")
 
     def routineTest(self):
         while True:
@@ -766,6 +779,8 @@ class RobotArmController():
         finishGoal(resultRequestCB)
     
     def cSpaceGRH(self,goal,finishGoal,feedbackPub,resultRequstCB):
+        self.robotState = MachineState.EXECUTING
+        print(self.robotState)
         # Step 1: Extract data from goal message
         moveType = goal["moveType"]
         mode = goal["mode"]
@@ -818,7 +833,6 @@ class RobotArmController():
         # Step 5: Create Joint Trajectories
         self.createTrajectories(desiredPositions,"J")
 
-
         # Step 4: Send command to Arduino if in operation mode. 
         if self.operatingMode == OperatingMode.OPERATION:
            self.sendCommand(arduinoCmd)
@@ -830,6 +844,9 @@ class RobotArmController():
         except:
             return
 
+        self.robotState = MachineState.COMPLETE
+        self.robotState = MachineState.IDLE
+        print(self.robotState)
         finishGoal(resultRequstCB)
 
     def gripObjGRH(self,goal,finishGoal,feedbackPub,resultRequestCB):
@@ -848,27 +865,26 @@ class RobotArmController():
             if gripType == "INTERNAL":
                 # Send Command to Activate Solenoid
                 self.sendCommand("solenoidon")
-                time.sleep(1)
+                
 
                 # Send command to desired grip diameter
                 self.sendCommand(f"REL,Q4:{round(q4RelativeTravel)}")
-                time.sleep(8)
+
 
                 # Send Command to De-activate Solenoiid
                 self.sendCommand("solenoidoff")
-                time.sleep(1)
+                
+  
 
                 # Send command to help release solenoid pins from planet carrier slots.
                 self.sendCommand("REL,Q4:-4")
-                time.sleep(2)
 
-                self.sendCommand("REL,Q4:2")
-                time.sleep(3)
-
+                self.sendCommand("REL,Q4:4")
+  
                 # Reset Q4's Arduino Position
                 self.gripDiameter = round(float(desiredGripDiameter))
                 self.sendCommand(f"HOME,DIRECT,Q4:{str(q4)}") # Indexing in degrees
-                time.sleep(2)
+
 
             elif gripType == "EXTERNAL":
                 pass
@@ -881,7 +897,7 @@ class RobotArmController():
         gripType = goal["GRIP TYPE"]
         
         if gripType == "INTERNAL":
-            desiredGripDiameter = self.endEffector.MIN_GRIP_DIAMETER + 1
+            desiredGripDiameter = self.endEffector.MIN_GRIP_DIAMETER + 5
         elif gripType == "EXTERNAL":
             desiredGripDiameter = self.endEffector.MAX_GRIP_DIAMETER
 
@@ -897,22 +913,17 @@ class RobotArmController():
             if gripType == "INTERNAL":
                 # Send Command to Activate Solenoid
                 self.sendCommand("solenoidon")
-                time.sleep(1)
 
                 # Send command to desired grip diameter
                 self.sendCommand(f"REL,Q4:{round(q4RelativeTravel)}")
-                time.sleep(10)
 
                 # Send Command to De-activate Solenoiid
                 self.sendCommand("solenoidoff")
-                time.sleep(1)
 
                 # Send command to help release solenoid pins from planet carrier slots.
                 self.sendCommand("REL,Q4:4")
-                time.sleep(2)
 
-                self.sendCommand("REL,Q4:-2")
-                time.sleep(2)
+                self.sendCommand("REL,Q4:-4")
 
                 # Reset Q4's Arduino Position
                 self.gripDiameter = round(float(desiredGripDiameter))
@@ -983,6 +994,7 @@ class RobotArmController():
             else:
                 self.sendCommand("motorsOff")
                 self.motorsOn = False
+        
 
     def indexGRH(self,goal,finishGoal,feedbackPub,resultRequestCB):
         # Step 1: Extract data from goal message
@@ -1094,10 +1106,12 @@ class RobotArmController():
         jState = self.jointState
         cState = self.poseState
         calState = self.calibrationState
+        gripD = self.gripDiameter
         # Publish state to topic
         self.publishers["jStatePub"].publishMsg(jState)
         self.publishers["cStatePub"].publishMsg(cState)
         self.publishers["calStatePub"].publishMsg(calState)
+        self.publishers["gripDiameterPub"].publishMsg(gripD)
     
     def updateJointState(self,q):
         # Update information in robotArm object
@@ -1133,4 +1147,71 @@ class RobotArmController():
             self.sendCommand("STOP")
         except:
             print("Unable to start Routine. Serial Communication not established.")
-            
+
+
+    # ====================================================
+    #   Methods for Routines
+    # ====================================================
+    def createRoutineStep(self,moveType:str = None,moveMode:str = None,gripType:str = None,gripDiameter:float = None,jogDistance:float = None,joint:str = None, axis:str = None,jointPositions:list = None,pose:list = None,elbowOri:str = "elbowDown",posZOffset:float = 0, negZOffset:float = 0):
+        goal = {
+            "MOVE TYPE": moveType,
+            "MOVE MODE": moveMode,
+            "GRIP TYPE": gripType,
+            "GRIP DIAMETER": gripDiameter,
+            "JOG DISTANCE": jogDistance,
+            "JOINT": joint,
+            "JOINT POSITIONS": jointPositions,
+            "AXIS": axis,
+            "POSE": pose,
+            "ELBOW ORIENTATION": elbowOri,
+            "POSITIVE Z-OFFSET": posZOffset,
+            "NEGATIVE Z-OFFSET": negZOffset,
+            }
+        return goal
+    
+    def defaultRoutine(self):
+        routine = {}
+        step1 = self.createRoutineStep(moveType = "Cartesian Space", moveMode = "ABS",pose = [191,191,0,0],elbowOri= "elbowUp")
+        step2 = self.createRoutineStep(moveType = "Cartesian Space", moveMode = "ABS",pose = [191,191,25,0],elbowOri= "elbowUp")
+        step3 = self.createRoutineStep(moveType = "Cartesian Space", moveMode = "ABS",pose = [191,0,25,60],elbowOri= "elbowUp")
+        step4 = self.createRoutineStep(moveType = "Cartesian Space", moveMode = "ABS",pose = [191,0,3,60],elbowOri= "elbowUp")
+        step6 = self.createRoutineStep(moveType = "Cartesian Space", moveMode = "ABS",pose = [191,0,25,60],elbowOri= "elbowUp")
+        step7 = self.createRoutineStep(moveType = "Cartesian Space", moveMode = "ABS",pose = [191,191,25,0],elbowOri = "elbowUp")
+        step8 = self.createRoutineStep(moveType = "Cartesian Space", moveMode = "ABS",pose = [191,191,0,0],elbowOri = "elbowUp")
+        
+        routine["1"] = step1
+        routine["2"] = step2
+        routine["3"] = step3
+        routine["4"] = step4
+        routine["6"] = step6
+        routine["7"] = step7
+        routine["8"] = step8
+        return routine
+
+    def runRoutine(self):
+        if not self.routine:
+            print("No routine present")
+            return
+        for routine,goal in self.routine.items():
+            if goal["MOVE TYPE"] == "Cartesian Space":
+                self.desiredElbOri = goal["ELBOW ORIENTATION"]
+                cGoal = {
+                    "moveType": goal["MOVE TYPE"],
+                    "mode": "ABS",
+                    "axis": "all",
+                    "jogDistance": goal["JOG DISTANCE"],
+                    "pose": goal["POSE"]
+                    }
+                self.actionClients["cCmdClient"].sendGoalRequest(cGoal)
+                self.actionClients["cCmdClient"].waitForResult()
+
+            elif goal["MOVE TYPE"] == "Joint Space":
+                jGoal = {
+                    "mode": goal["MOVE MODE"],
+                    "joint": goal["JOINT"],
+                    "jogDistance": goal["JOG DISTANCE"],
+                    "jointPositions": goal["JOINT POSITIONS"],
+                }
+                print(jGoal)
+            elif goal["MOVE TYPE"] == "Pick ":
+                return

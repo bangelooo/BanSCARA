@@ -126,6 +126,8 @@ class ActionClient:
         self.feedbackSub = Subscriber(self.action.name)
         self.action.feedbackTopic.addSubscriber(self.feedbackSub)
         self.goalAccepted = False
+        self.doneEvent = threading.Event()
+        
 
     # ===================================================
     #   Methods for goal request and registered callbacks
@@ -137,6 +139,7 @@ class ActionClient:
 
         :param goalMsg: Requested goal to be processed by the Action Server.
         """
+        self.doneEvent.clear()
         self.action.processGoal(goalMsg,self._goalResponseCB)
 
     def _goalResponseCB(self,response):
@@ -150,13 +153,19 @@ class ActionClient:
         if response == "ACK":
             # Set goal accepted flag
             self.goalAccepted = True
+            self.resultReceived = False
             print("Goal Accepted")
 
-            # Register a callback to request a response.
+            # Register a callback to request a result.
             return self.requestResult
   
     def requestResult(self,result):
-        print(result)
+        if result == "SUCCESS":
+            self.doneEvent.set()
+
+    # NEED METHOD FOR CLIENT TO WAIT UNTIL THE RESULT IS RECIEVED BEFORE SENDING ANOTHER GOAL 
+    def waitForResult(self):
+        self.doneEvent.wait()
 
     # ===================================================
     #   Methods for cancel request and registered callbacks
@@ -240,11 +249,10 @@ class ActionServer:
     def _finishGoal(self,resultRequestCB):
         # Update server state to READY
         self.actionServerState = ServerState.READY
-        result = "Success! Goal completed"
-
+        result = "SUCCESS"
+        
         # Send the result to the client.
         resultRequestCB(result)
-        print(self.actionServerState)
 
     # =============================================
     #  Feedback Publisher

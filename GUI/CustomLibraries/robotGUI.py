@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,QHBoxLayout,QGridLayout,
     QCheckBox,
     QGroupBox,
-    QButtonGroup,
+    QButtonGroup,QComboBox,
     QSlider,
 )
 
@@ -85,6 +85,22 @@ class StatusLED(QLabel):
             border-radius: {self.diameter // 2}px;
             border: 1px solid black;
         """)
+
+def createRoutineStepRow(numSteps:int):
+    container = QWidget()
+    routineStepRow = QHBoxLayout(container)
+    DDList = QComboBox()
+    routineSteps = []
+    for i in range(numSteps):
+        routineSteps.append(f"Step {i}")
+    DDList.addItems(routineSteps)
+
+    DDList.setEditable(False)
+    routineStepRow.addWidget(DDList)
+    
+    return container
+
+
 
 class ControlWorker(QRunnable):
     def __init__(self,robotController):
@@ -172,7 +188,7 @@ class RobotGUI(QMainWindow):
         #   Publishers and Subscribers
         # ======================================
         # Set publishers and subscribers for robot controller
-        subs = ["jState","cState","calState"]
+        subs = ["jState","cState","calState","gripDiameter"]
         pubs = ["jCmd","cCmd"]
 
        # Create topics dictionary
@@ -238,6 +254,7 @@ class RobotGUI(QMainWindow):
         # Create tab structure for main window
         tabs = QTabWidget()
         tabs.addTab(self.mainWindow(), "MAIN")
+        tabs.addTab(self.teachWindow(),"TEACH")
 
         self.setCentralWidget(tabs)
 
@@ -256,7 +273,7 @@ class RobotGUI(QMainWindow):
         self.buttonDict["String Command"]["output"]["button"].clicked.connect(self.clearLog)
 
         self.buttonDict["Robot Control"]["OPERATION MODE TOGGLE"]["button"].toggled.connect(self.controller.toggleOpMode)
-        self.buttonDict["Robot Control"]["START ROUTINE"]["button"].clicked.connect(self.controller.routineTest)
+        self.buttonDict["Robot Control"]["START ROUTINE"]["button"].clicked.connect(self.controller.runRoutine)
         self.buttonDict["Robot Control"]["MOTOR ON TOGGLE"]["button"].toggled.connect(self.controller.toggleMotorsOn)
         
         self.buttonDict["Robot Control"]["CALIBRATE"]["button"].clicked.connect(self.sendIndexGoalRequest)
@@ -292,6 +309,15 @@ class RobotGUI(QMainWindow):
         layout.addWidget(slp)
 
         return container
+
+    def teachWindow(self):
+        test = self.robotRoutineSequenceGroup()
+        return test
+        # Create Panels
+        #cp = self.controlPanel()
+
+        # Add widgets to layout
+        #layout.addWidget(cp)
     
     def controlPanel(self):
         container = QWidget()
@@ -321,17 +347,18 @@ class RobotGUI(QMainWindow):
 
         # Create Widget Groups
         cSettingGroup,cSettingDict,calStatusDictEntry = self.createCalibrationSettingGroup()
-        eeSettingGroup,eeSettingDict = self.createEESettingGroup()
+        eeSettingGroup,eeBtnSettingDict,eeTextDict = self.createEESettingGroup()
         cStateGroup,cStateDict = self.createcStateGroup()
         jStateGroup,jStateDict = self.createjStateGroup()
 
         # Add desired dictionaries
         self.buttonDict["Calibration Settings"] = cSettingDict
-        self.buttonDict["End Effector Settings"] = eeSettingDict
+        self.buttonDict["End Effector Settings"] = eeBtnSettingDict
         self.textBoxDict["Cartesian Control Settings"] = cStateDict
         self.textBoxDict["Joint Space Control Settings"] = jStateDict
-
+        self.textBoxDict["End Effector Settings"] = eeTextDict
         self.statusDict["Calibration Status"] = calStatusDictEntry
+        
         
 
         # Add lineEdit to desired dictionary
@@ -357,7 +384,7 @@ class RobotGUI(QMainWindow):
 
         return container
 
-# ==================================================================  
+# ==================================================================   
 #     METHODS TO CREATE GROUPINGS FOR PANELS
 # ==================================================================
     def createEESettingGroup(self):
@@ -365,30 +392,46 @@ class RobotGUI(QMainWindow):
         layout = QVBoxLayout(container)
 
         # Button Dictionary
-        eeDict = {}
+        eeButtDict = {}
+        eeTextDict = {}
 
-        # Row: Grip Orientation
+        # Row 1: Grip Orientation
         gripTypeRow = QHBoxLayout()
         gripRowTypeLbl = QLabel ("GRIP ORIENTATION")
         gripTypeRow.addWidget(gripRowTypeLbl)
 
+        # Row 2: Current Grip Position
+        gripPosRow = QHBoxLayout()
+        gripPosLbl = QLabel("CURRENT GRIP DIAMETER")
+        gripPosTxt = QLineEdit("0.0")
+        gripPosLbl2 = QLabel("mm")
+        gripPosTxt.setReadOnly(True)
+        gripPosRow.addWidget(gripPosLbl)
+        gripPosRow.addWidget(gripPosTxt)
+        gripPosRow.addWidget(gripPosLbl2)
+
+        eeTextDict["GRIP DIAMETER"] = {"button":gripPosTxt}
+
+
+        # Row 3: Desired Grip Position
         gripTypeBtnGroup = QButtonGroup(container)
         gripTypeBtnGroup.setExclusive(True)
 
         for name in ["INTERNAL", "EXTERNAL"]:
             btn = QPushButton(name)
             btn.setCheckable(True)
-            eeDict[name] = {}
-            eeDict[name]["button"] = btn
+            eeButtDict[name] = {}
+            eeButtDict[name]["button"] = btn
             gripTypeRow.addWidget(btn)
             gripTypeBtnGroup.addButton(btn)
 
-        valueRow = ValueSliderWidget(15,110,15,"GRIP DIAMETER (mm)","End Effector Control",self.textBoxDict)
+        valueRow = ValueSliderWidget(15,110,15,"GRIP DIAMETER SETPOINT (mm)","End Effector Control",self.textBoxDict)
 
         layout.addLayout(gripTypeRow)
+        layout.addLayout(gripPosRow)
         layout.addWidget(valueRow)
 
-        return container,eeDict
+        return container,eeButtDict,eeTextDict
 
     def createCalibrationSettingGroup(self):
         container = QGroupBox("CALIBRATION SETTINGS")
@@ -667,6 +710,31 @@ class RobotGUI(QMainWindow):
 
         return container,buttDict,txtDict
 
+    def robotRoutineSequenceGroup(self):
+        container = QGroupBox("ROBOT ROUTINE SEQUENCE")
+        layout = QVBoxLayout(container)
+
+        # Row 1: Title Row
+        titleRow = QHBoxLayout()
+        for lblName in [" ","MOVE-TYPE","GRIP TYPE","GRIP\nDIAMETER (mm)", "X (mm)","Y (mm)","Z (mm)","φ (deg)"]:
+            lbl = QLabel(lblName)
+            #lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            titleRow.addWidget(lbl)
+
+        layout.addLayout(titleRow)
+
+        for i in range(16):
+            row = QHBoxLayout()
+            moveNum = QLabel(f"STEP {i}:")
+            row.addWidget(moveNum)
+            layout.addLayout(row)
+            for j in range(7):
+                obj = QLineEdit(" - ")
+                obj.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                obj.setReadOnly(True)
+                row.addWidget(obj)
+        return container
+
 # ==================================================================  
 #     METHODS TO BUTTON BEHAVIORS
 # ==================================================================  
@@ -844,7 +912,7 @@ class RobotGUI(QMainWindow):
                 break
         
         # Step 3: Populate the desired grip diameter
-        gripDiameter = self.textBoxDict["End Effector Control"]["GRIP DIAMETER (mm)"].text()
+        gripDiameter = self.textBoxDict["End Effector Control"]["GRIP DIAMETER SETPOINT (mm)"].text()
 
         # Step 4: Construct Goal
         goal = {
@@ -886,6 +954,7 @@ class RobotGUI(QMainWindow):
         jState = self.subscribers["jStateSub"].msg
         cState = self.subscribers["cStateSub"].msg
         calState = self.subscribers["calStateSub"].msg
+        gripDiameter = self.subscribers["gripDiameterSub"].msg
         
         # Update joint state fields in GUI
         for i, (_,subDict) in enumerate(self.textBoxDict["Joint Space Control Settings"].items()):
@@ -911,7 +980,10 @@ class RobotGUI(QMainWindow):
                 value.setState(True)
             else:
                 value.setState(False)
-
+        
+        # Update the grip diamter field in the GUI
+        self.textBoxDict["End Effector Settings"]["GRIP DIAMETER"]["button"].setText(str(round(gripDiameter,2)))
+   
     def updateRobotState(self):
         # Update Current Cartesian Cartesian Position 
         pose = self.robot.pose["POSITION"]
