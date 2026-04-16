@@ -1133,22 +1133,6 @@ class RobotArmController():
         for _,item in self.actionServers.items():
             item.handleGoalRequest()
     
-    def practiceRoutine(self):
-        try:
-            i = 0
-            while i < 5:
-                arduinoCMD = "ABS,Q1:90,Q3:-90"
-                self.sendCommand(arduinoCMD)
-                time.sleep(10)
-                arduinoCMD = "ABS,Q2:0,Q3:90"
-                self.sendCommand(arduinoCMD)
-                time.sleep(10)
-                i += 1
-            self.sendCommand("STOP")
-        except:
-            print("Unable to start Routine. Serial Communication not established.")
-
-
     # ====================================================
     #   Methods for Routines
     # ====================================================
@@ -1173,19 +1157,20 @@ class RobotArmController():
         routine = {}
         step1 = self.createRoutineStep(moveType = "Cartesian Space", moveMode = "ABS",pose = [191,191,0,0],elbowOri= "elbowUp")
         step2 = self.createRoutineStep(moveType = "Cartesian Space", moveMode = "ABS",pose = [191,191,25,0],elbowOri= "elbowUp")
-        step3 = self.createRoutineStep(moveType = "Cartesian Space", moveMode = "ABS",pose = [191,0,25,60],elbowOri= "elbowUp")
-        step4 = self.createRoutineStep(moveType = "Cartesian Space", moveMode = "ABS",pose = [191,0,3,60],elbowOri= "elbowUp")
-        step6 = self.createRoutineStep(moveType = "Cartesian Space", moveMode = "ABS",pose = [191,0,25,60],elbowOri= "elbowUp")
-        step7 = self.createRoutineStep(moveType = "Cartesian Space", moveMode = "ABS",pose = [191,191,25,0],elbowOri = "elbowUp")
-        step8 = self.createRoutineStep(moveType = "Cartesian Space", moveMode = "ABS",pose = [191,191,0,0],elbowOri = "elbowUp")
-        
+
+        step3 = self.createRoutineStep(moveType = "Pick",moveMode = "ABS",gripType = "INTERNAL",gripDiameter= 85,pose = [191,0,6,0],elbowOri="elbowUp",posZOffset= 19)
+
+        step4 = self.createRoutineStep(moveType = "Place",moveMode = "ABS",gripType = "INTERNAL",gripDiameter= 85,pose = [191,191,6,0],elbowOri="elbowUp",posZOffset= 19)
+        step5 = self.createRoutineStep(moveType = "Cartesian Space", moveMode = "ABS",pose = [191,191,30,0],elbowOri= "elbowUp")
+        step6 = self.createRoutineStep(moveType = "Cartesian Space", moveMode = "ABS",pose = [382,0,30,0],elbowOri= "elbowUp")
+
         routine["1"] = step1
         routine["2"] = step2
         routine["3"] = step3
         routine["4"] = step4
+        routine["5"] = step5
         routine["6"] = step6
-        routine["7"] = step7
-        routine["8"] = step8
+
         return routine
 
     def runRoutine(self):
@@ -1193,6 +1178,7 @@ class RobotArmController():
             print("No routine present")
             return
         for routine,goal in self.routine.items():
+            print(f"Starting Steps: {routine}")
             if goal["MOVE TYPE"] == "Cartesian Space":
                 self.desiredElbOri = goal["ELBOW ORIENTATION"]
                 cGoal = {
@@ -1213,5 +1199,81 @@ class RobotArmController():
                     "jointPositions": goal["JOINT POSITIONS"],
                 }
                 print(jGoal)
-            elif goal["MOVE TYPE"] == "Pick ":
-                return
+            elif goal["MOVE TYPE"] == "Pick":
+                poseTch = goal["POSE"]
+                poseApr = poseTch.copy()
+                poseApr[2] += goal["POSITIVE Z-OFFSET"]
+
+                cGoal0 = {
+                    "moveType": "Cartesian Space",
+                    "mode": "ABS",
+                    "axis": "all",
+                    "jogDistance": goal["JOG DISTANCE"],
+                    "pose": poseTch
+                    }
+                cGoal1 = {
+                    "moveType": "Cartesian Space",
+                    "mode": "ABS",
+                    "axis": "all",
+                    "jogDistance": goal["JOG DISTANCE"],
+                    "pose": poseApr
+                    }
+                
+                gripGoal = {
+                    "GRIP TYPE": goal["GRIP TYPE"],
+                    "GRIP DIAMETER": goal["GRIP DIAMETER"]
+                }
+
+                self.actionClients["cCmdClient"].sendGoalRequest(cGoal1)
+                self.actionClients["cCmdClient"].waitForResult()
+
+
+                self.actionClients["cCmdClient"].sendGoalRequest(cGoal0)
+                self.actionClients["cCmdClient"].waitForResult()
+
+                self.actionClients["gripCmdClient"].sendGoalRequest(gripGoal)
+                self.actionClients["gripCmdClient"].waitForResult()
+
+                self.actionClients["cCmdClient"].sendGoalRequest(cGoal1)
+                self.actionClients["cCmdClient"].waitForResult()
+            
+            elif goal["MOVE TYPE"] == "Place":
+                poseTch = goal["POSE"]
+                poseApr = poseTch.copy()
+                poseApr[2] += goal["POSITIVE Z-OFFSET"]
+
+                cGoal0 = {
+                    "moveType": "Cartesian Space",
+                    "mode": "ABS",
+                    "axis": "all",
+                    "jogDistance": goal["JOG DISTANCE"],
+                    "pose": poseTch
+                    }
+                cGoal1 = {
+                    "moveType": "Cartesian Space",
+                    "mode": "ABS",
+                    "axis": "all",
+                    "jogDistance": goal["JOG DISTANCE"],
+                    "pose": poseApr
+                    }
+                
+                releaseGoal = {
+                    "GRIP TYPE": goal["GRIP TYPE"],
+                    "GRIP DIAMETER": goal["GRIP DIAMETER"]
+                }
+
+                self.actionClients["cCmdClient"].sendGoalRequest(cGoal1)
+                self.actionClients["cCmdClient"].waitForResult()
+
+                self.actionClients["cCmdClient"].sendGoalRequest(cGoal0)
+                self.actionClients["cCmdClient"].waitForResult()
+
+                self.actionClients["releaseCmdClient"].sendGoalRequest(releaseGoal)
+                self.actionClients["releaseCmdClient"].waitForResult()
+
+                self.actionClients["cCmdClient"].sendGoalRequest(cGoal1)
+                self.actionClients["cCmdClient"].waitForResult()
+
+            print(f"Finishing Step{routine}")
+
+        return
